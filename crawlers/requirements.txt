@@ -1,0 +1,15 @@
+# 爬蟲產線需要的第三方套件（分類器本身不需要任何第三方套件）
+#
+# 安裝：py -3.12 -m pip install -r crawlers/requirements.txt
+# 注意：本機裸 python 可能指向其他虛擬環境，請一律用 py -3.12
+
+requests>=2.31          # 六支 fetcher 的 HTTP（fetch_insurance 用 stdlib urllib）
+beautifulsoup4>=4.12     # 解析 ib.gov.tw／sfb.gov.tw／afna.gov.tw 的靜態 HTML 表格
+pdfplumber>=0.11         # 只有 fetch_insurance 的保經 PDF 子集用（lazy import）
+xlrd>=2.0                # 讀 fsc.gov.tw 的 .xls 舊格式名冊（期貨業）
+openpyxl>=3.1            # 讀 fsc.gov.tw 的 .xlsx 名冊（投信／投顧／證金）
+
+# 選配：官方站台改成 JS 渲染或被 WAF 擋時的退路。
+# 六支 fetcher 都是「requests/urllib 優先、失敗才 lazy import playwright」，
+# 正常情況不需要安裝。
+# playwright>=1.44
