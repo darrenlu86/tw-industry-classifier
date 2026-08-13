@@ -45,9 +45,13 @@ add("L1-1", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.js
     "命中統編修正表（目前 %d 筆）" % len(X.TAX_ID_FIX),
     "（先改判統編後重跑）", "—", "high",
     "帳務系統的佔位碼或已知錯碼 → 正確統編。內容不進版控")
-for tid, name in X.PERIPHERAL.items():
-    add("L1-2", "L1 特殊規則", "內建白名單（core/exceptions.py）", "統一編號", "= %s" % tid,
-        "政府機關", "周邊單位", "high", name)
+for tid, (name, peri_group) in sorted(X.PERIPHERAL_BUILTIN.items()):
+    add("L1-2", "L1 特殊規則", "內建白名單（core/exceptions.py）",
+        "統一編號", "= %s" % tid, peri_group, "周邊單位", "high", name)
+add("L1-2", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
+    "命中本地追加周邊單位（目前 %d 筆）" % (len(X.PERIPHERAL) - len(X.PERIPHERAL_BUILTIN)),
+    "（依所屬大類）", "周邊單位", "high",
+    "組織自行認定的周邊單位（公協會等），值＝[名稱, 所屬大類]。內容不進版控")
 add("L1-3", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
     "命中已裁決例外表（目前 %d 筆）" % len(X.OVERRIDE),
     "（依裁決值）", "（依裁決值）", "high",
@@ -59,10 +63,6 @@ for reg in R.REGISTRIES:
     add(reg["id"], "L2 權威名冊", reg["source"], reg["key"],
         "命中名冊（%s 列）" % f"{reg['rows']:,}",
         gives[0], gives[1] if len(gives) > 1 else "（依名冊值）", "high", reg["note"])
-for cond, sub in R.OTHERFIN_REFINE:
-    add("L2-1R", "L2 權威名冊", "租賃公會名錄命中後細分", "稅籍主碼／名稱", cond,
-        "其他金融", sub, "high",
-        "前提＝已由 L2-1 判為其他金融；有此前提稅籍汽機車碼才安全可用")
 
 # ── L3 ────────────────────────────────────────────────────────────────────
 for c2, label in R.MEDICAL2.items():
@@ -80,14 +80,6 @@ for c2, (group, sub, label) in R.EDU_CORP2.items():
 add("L3-6", "L3 名稱關鍵字", "官方正式名稱", "名稱含", "／".join(R.CORP_PREFIX),
     "教育與法人", "財團法人與公協會", "medium",
     "稅籍主碼為營業碼但實體是法人時的糾偏（稅籍「組織別」欄不可靠，故用名稱）")
-add("L3-9a", "L3-9 GCIS所營事業", "經濟部商工登記", "所營事業代碼",
-    "名稱含 %s 之一，且所營事業含 %s ＋ %s"
-    % ("／".join(R.GCIS_TRIGGER_WORDS), "／".join(R.GCIS_DEBT_ITEMS), R.GCIS_LEASE_ITEM),
-    "其他金融", "消費分期", "medium",
-    "消費分期業者非特許業、無官方名冊，稅籍主碼亦不反映本業")
-add("L3-9b", "L3-9 GCIS所營事業", "經濟部商工登記", "所營事業代碼",
-    "同上但無 %s 租賃業" % R.GCIS_LEASE_ITEM, "其他金融", "債權媒合", "medium",
-    "以 4 家實測驗證：亞太普惠／願望實現／逗派含兩者；台灣聯合僅含債權收買")
 for c2 in sorted(R.SUB_BY_MAJOR2):
     add("L3-7", "L3 稅籍碼表", "財政部稅籍", "主行業代號前2碼",
         "= %s（%s）" % (c2, R.MAJOR2_LABEL.get(c2, "")),

@@ -24,7 +24,7 @@ def normalize_tax_id(raw):
 
 
 class ProviderBase:
-    """所有 provider 的共同父類。子類必須實作 tax()／gcis_items()。
+    """所有 provider 的共同父類。子類必須實作 tax()。
 
     authority／gov／school／nonprofit 四個名冊都是小檔（合計約 13 MB），
     兩種模式都直接載入記憶體，故實作放在此父類共用。
@@ -105,9 +105,6 @@ class ProviderBase:
         return self._nonprofit.get(tax_id)
 
     def tax(self, tax_id):
-        raise NotImplementedError
-
-    def gcis_items(self, tax_id):
         raise NotImplementedError
 
     def company(self, tax_id):

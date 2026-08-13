@@ -13,8 +13,8 @@ r"""API Provider — 打單筆查詢 API，免下載 320 MB 全檔
       GET https://eip.fia.gov.tw/OAI/api/schoolBanData/{ban}     → unitNm
   GCIS 公司登記（稅籍查無時補名稱，例如已解散公司、外商在台）
       應用一 5F64D864 → Company_Name、Company_Status_Desc
-      應用三 236EE382 → Cmp_Business 所營事業（L3-9 用）
       查無＝HTTP 200 但空 body（與稅籍的 404 語意不同，要分開處理）
+      （v4 起引擎不再查所營事業——原 L3-9 用的應用三 236EE382 已退場）
 
 仍須隨包附的小檔（政府機關唯一來源，無任何單筆 API）
 ──────────────────────────────────────────────────────────────────────────
@@ -50,7 +50,6 @@ from provider_base import ProviderBase  # noqa: E402
 FIA = "https://eip.fia.gov.tw/OAI/api"
 GCIS = "https://data.gcis.nat.gov.tw/od/data/api"
 GCIS_COMPANY = GCIS + "/5F64D864-61CB-4D0D-8AD9-492047CC1EA6"
-GCIS_BUSINESS_ITEMS = GCIS + "/236EE382-4942-41A9-BD03-CA0709025E7C"
 UA = {"User-Agent": "Mozilla/5.0 (industry_classifier/1.0)", "Accept": "application/json"}
 
 MISS = object()          # 明確的「查無此統編」標記，與 None（尚未查）區分
@@ -178,15 +177,6 @@ class ApiProvider(ProviderBase):
         row = rec[0] if isinstance(rec, list) else rec
         return {"name": (row.get("Company_Name") or "").strip(),
                 "status": (row.get("Company_Status_Desc") or "").strip()}
-
-    def gcis_items(self, tax_id):
-        url = GCIS_BUSINESS_ITEMS + "?$format=json&$filter=" + urllib.parse.quote(
-            "Business_Accounting_NO eq " + tax_id)
-        rec = self._cached("items:" + tax_id, lambda: self._get(url))
-        if rec is MISS or not rec:
-            return None
-        row = rec[0] if isinstance(rec, list) else rec
-        return {i["Business_Item"] for i in (row.get("Cmp_Business") or [])}
 
     def save_gcis_cache(self):
         """存快取（沿用 local provider 的方法名，供 CLI 統一呼叫）。"""

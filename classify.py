@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 r"""產業分類查詢 — 統一入口（本地端與 API 端共用）
 
-    輸入統一編號 → 官方正式名稱 ＋ 八大分類 ＋ 子分類 ＋ 分類依據
+    輸入統一編號 → 官方正式名稱 ＋ 產業大類 ＋ 產業子類 ＋ 分類依據
+
+產業大類／產業子類為定版單軌（2026-08-11）：身分軌命中者沿用八大分類；
+一般企業改由行業軌（稅籍主行業代號 → A–S 十九大類）回答。
+輸出同時保留身分軌原值（大分類／子分類）供稽核。
 
 兩種查詢模式，同一套規則、同一個引擎，結果一致：
 
@@ -45,7 +49,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 DATA = os.path.join(HERE, "data")
 OUTPUT = os.path.join(HERE, "output")
-RULES_VERSION = "v3"
+RULES_VERSION = "v4"
 
 
 def build_provider(mode, offline):
@@ -118,19 +122,18 @@ def count_generic_rules():
 
     本地例外表另計——它的筆數會隨各組織自己的裁決而變，不算通用規則。
     """
-    return (2                          # L1-1／L1-3 各以一條摘要列表示
-            + len(X.PERIPHERAL)        # L1-2 內建白名單（法定公開機構）
-            + len(R.REGISTRIES) + len(R.OTHERFIN_REFINE)
+    return (3                          # L1-1／L1-3／L1-2 本地追加，各以一條摘要列表示
+            + len(X.PERIPHERAL_BUILTIN)  # L1-2 內建周邊單位白名單（法定公開機構）
+            + len(R.REGISTRIES)
             + len(R.MEDICAL2) + len(R.FIN6) + len(R.FIN4) + len(R.EDU_CORP2)
             + 1                        # L3-6 法人名稱前綴
-            + 2                        # L3-9a／L3-9b
             + len(R.SUB_BY_MAJOR2) + len(R.NAME_RULES)
             + 1)                       # L4 兜底
 
 
 def main():
     ap = argparse.ArgumentParser(
-        description="統編 → 官方名稱與八大產業分類",
+        description="統編 → 官方名稱與產業分類（產業大類＋產業子類）",
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("tax_id", nargs="?", help="要查的統一編號（單筆查詢）")
     ap.add_argument("--mode", choices=("auto", "local", "api"), default="auto",

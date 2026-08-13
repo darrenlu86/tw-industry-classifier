@@ -16,8 +16,8 @@ r"""驗收測試：兩種模式一致性 ＋ 重現性
     py -3.12 tests/test_consistency.py --skip-api            # 只測本地端（無外網時）
 
 離線注意：test 1 需要外網（api 模式必然連外）。無外網請加 --skip-api，
-其餘四項仍會執行——但若清單中有統編觸發 L3-9（GCIS），本地端也需要外網，
-此時請改用 --offline-local，該層會被跳過並在輸出如實標記。
+其餘四項仍會執行——但「稅籍查無」戶的名稱解析會查 GCIS（連外），
+此時請改用 --offline-local，該筆改用備用名稱並在輸出如實標記。
 """
 import argparse
 import csv
@@ -100,7 +100,7 @@ def main():
     failures = []
 
     print("輸入清單：%s" % args.input)
-    print("規則版本 v3（rules.py）")
+    print("規則版本 v4（rules.py）")
     print()
 
     # ── test 2／3：重現性 ────────────────────────────────────────────────

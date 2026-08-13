@@ -10,8 +10,9 @@ r"""本地端 Provider — 讀已下載的全檔，可完全離線執行
   3. 逐筆掃描（沒索引又只查一筆時的退路）
      掃 zip 並在命中後提早結束，平均約 10–20 秒。結果會快取在記憶體。
 
-GCIS 所營事業（L3-9）在本地端模式仍需連外——因為經濟部沒有提供該項目的全量檔。
-若指定 --offline，L3-9 會被跳過，該類統編改由稅籍大類映射判定；引擎會如實記錄。
+GCIS 在本地端模式僅剩「名稱解析」一種用途（company()，補稅籍查無者的名稱），
+仍需連外；--offline 時該筆改用備用名稱並標記。
+（v4 起引擎不再查 GCIS 所營事業——原 L3-9 層已移除。）
 """
 import csv
 import io
@@ -32,7 +33,6 @@ from provider_base import ProviderBase, normalize_tax_id  # noqa: E402
 
 TAX_ZIP = "BGMOPEN1.zip"
 TAX_INDEX = "tax_index.sqlite"
-GCIS_API3 = "https://data.gcis.nat.gov.tw/od/data/api/236EE382-4942-41A9-BD03-CA0709025E7C"
 GCIS_COMPANY = "https://data.gcis.nat.gov.tw/od/data/api/5F64D864-61CB-4D0D-8AD9-492047CC1EA6"
 UA = {"User-Agent": "Mozilla/5.0 (industry_classifier/1.0)"}
 
@@ -139,28 +139,6 @@ class LocalProvider(ProviderBase):
                 return rec
         self._tax_cache[tax_id] = None
         return None
-
-    # ── GCIS 所營事業（L3-9 觸發時才呼叫）───────────────────────────────
-    def gcis_items(self, tax_id):
-        if tax_id in self._gcis:
-            rec = self._gcis[tax_id]
-            return set(rec.get("items", [])) if "error" not in rec else None
-        if self.offline:
-            self._gcis[tax_id] = {"error": "offline 模式，未查詢"}
-            return None
-        url = GCIS_API3 + "?$format=json&$filter=" + urllib.parse.quote(
-            "Business_Accounting_NO eq " + tax_id)
-        try:
-            with urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=25) as r:
-                raw = r.read().decode("utf-8", "replace")
-            data = json.loads(raw) if raw.strip() and not raw.startswith("此API") else []
-            items = [i["Business_Item"] for i in (data[0].get("Cmp_Business") or [])] if data else []
-            self._gcis[tax_id] = {"items": items}
-            time.sleep(0.3)
-            return set(items)
-        except Exception as e:                        # noqa: BLE001
-            self._gcis[tax_id] = {"error": "%s: %s" % (type(e).__name__, e)}
-            return None
 
     def company(self, tax_id):
         """GCIS 公司登記：補「稅籍查無」者的名稱（已解散、廢止、外商在台）。
