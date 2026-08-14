@@ -40,7 +40,6 @@ def add(rid, layer, source, key, cond, group, sub, conf, note=""):
 # 那些是針對特定機構的人工裁決，理由常涉及業務關係，不該進版控的文件。
 # 這裡只記「有這一層、目前幾筆」；內容由使用者自己在
 # exceptions/local_exceptions.json 維護，格式見 exceptions/README.md。
-# 需要含內容的完整版給內部看時，加 --include-local（輸出檔已在 .gitignore）。
 add("L1-1", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
     "命中統編修正表（目前 %d 筆）" % len(X.TAX_ID_FIX),
     "（先改判統編後重跑）", "—", "high",

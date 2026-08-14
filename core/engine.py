@@ -35,25 +35,15 @@ if __package__ in (None, ""):
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import rules as R
     import exceptions as X
+    from provider_base import normalize_tax_id
 else:
     from . import rules as R
     from . import exceptions as X
+    from .provider_base import normalize_tax_id
 
 # 兼營多列時的主分類優先序（數字小者優先；同序按子分類字典序）
 GROUP_PRIORITY = {"金控與銀行": 0, "證券期貨": 1, "保險": 2, "租賃": 3, "電支支付": 4}
 GROUP_PRIORITY_DEFAULT = 9
-
-
-def normalize_tax_id(raw):
-    """統編正規化：去空白／引號／全形空白，純數字不足 8 碼補前導零。
-
-    來源系統常見兩種損壞：Excel 把統編當數字讀掉前導零、以及 16 碼折半重複。
-    此處只處理前導零；折半損壞需在資料清理階段處理（見 docs/03_資料來源.md）。
-    """
-    t = (raw or "").strip().strip('"').replace("　", "").replace(" ", "")
-    if t.isdigit() and 0 < len(t) < 8:
-        t = t.zfill(8)
-    return t
 
 
 def resolve_name(tax_id, provider, fallback_name=""):
@@ -248,6 +238,9 @@ def query(raw_tax_id, provider, fallback_name="", as_of=""):
         confidence = "low"
     if not name:                                     # 名稱完全查不到時誠實標記
         name_source = "查無官方名稱"
+        confidence = "low"
+    if any(k.split(":", 1)[-1] == tax_id             # strict=False 降級筆：
+           for k in getattr(provider, "degraded", ())):  # 任一端點失敗＝判定基礎不完整
         confidence = "low"
     return {
         "統一編號": tax_id,

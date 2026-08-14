@@ -17,6 +17,11 @@ if hasattr(sys.stdout, "reconfigure"):
 
 
 def normalize_tax_id(raw):
+    """統編正規化：去空白／引號／全形空白，純數字不足 8 碼補前導零。
+
+    來源系統常見兩種損壞：Excel 把統編當數字讀掉前導零、以及 16 碼折半重複。
+    此處只處理前導零；折半損壞需在資料清理階段處理（見 docs/資料來源與更新.md）。
+    """
     t = (raw or "").strip().strip('"').replace("　", "").replace(" ", "")
     if t.isdigit() and 0 < len(t) < 8:
         t = t.zfill(8)

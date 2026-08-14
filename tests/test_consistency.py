@@ -32,6 +32,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "core"))
 
+import engine  # noqa: E402
 import rules as R  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):
@@ -50,8 +51,11 @@ def sha256(path):
 
 
 def load(path):
+    # classify.py 的輸出表頭套了 engine.DISPLAY_RENAME（「僅供參考」標註）；
+    # 讀回時還原成內部欄名，本檔一律以內部名操作。
+    inv = {v: k for k, v in engine.DISPLAY_RENAME.items()}
     with open(path, encoding="utf-8-sig", newline="") as f:
-        return list(csv.DictReader(f))
+        return [{inv.get(k, k): v for k, v in r.items()} for r in csv.DictReader(f)]
 
 
 def run(mode, input_path, out_name, extra=()):
@@ -65,7 +69,7 @@ def run(mode, input_path, out_name, extra=()):
     return out
 
 
-def diff_rows(a, b, label_a, label_b):
+def diff_rows(a, b):
     """逐欄比對兩份結果（以統編為鍵）。回差異清單。"""
     ka = {r["統一編號"]: r for r in a}
     kb = {r["統一編號"]: r for r in b}
@@ -134,7 +138,6 @@ def main():
     # ── test 4：輸入順序無關 ─────────────────────────────────────────────
     print()
     print("[2] 輸入順序無關性")
-    rows = load(args.input) if False else None          # 以原始 CSV 逐列打亂
     with open(args.input, encoding="utf-8-sig", newline="") as f:
         raw = list(csv.reader(f))
     head, body = raw[0], raw[1:]
@@ -147,7 +150,7 @@ def main():
         if sha256(p4) == h[0]:
             print("    ✓ 打亂輸入順序後結果相同")
         else:
-            d = diff_rows(load(p4), load(os.path.join(TMP, "local_run1.csv")), "亂序", "原序")
+            d = diff_rows(load(p4), load(os.path.join(TMP, "local_run1.csv")))
             failures.append("輸入順序影響結果（%d 處差異）" % len(d))
             print("    ✗ 有 %d 處差異" % len(d))
 
@@ -170,7 +173,7 @@ def main():
         if not pa:
             failures.append("API 模式執行失敗")
         elif base:
-            d = diff_rows(base, load(pa), "local", "api")
+            d = diff_rows(base, load(pa))
             if not d:
                 print("    ✓ %d 筆逐欄相同（排除 查詢模式／資料版本）" % len(base))
             else:

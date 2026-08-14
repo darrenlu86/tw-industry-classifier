@@ -10,22 +10,19 @@ r"""爬蟲產線的路徑定義（唯一來源）
     ├── baseline/   23 份既有名冊快照，各 fetcher 的 diff 比對基準
     ├── raw/<日期>/ 每次抓取的原始快照與異動報告（fetcher 輸出）
     └── build/      builder 產出（authority_master.csv 與報告）
+
+分類器讀的資料層（data/）不在這裡定義：爬蟲本身不寫這裡（builder 輸出到 BUILD_DIR，
+要不要覆蓋到 data/ 是部署決定，見 docs/名冊維護與爬蟲.md 步驟 5）。
 """
 import os
 from datetime import date
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PKG_ROOT = os.path.dirname(HERE)
 
 MASTERS_DIR = os.path.join(HERE, "masters")
 BASELINE_DIR = os.path.join(HERE, "baseline")
 RAW_DIR = os.path.join(HERE, "raw")
 BUILD_DIR = os.path.join(HERE, "build")
-
-# 分類器讀的資料層。爬蟲本身不寫這裡（builder 輸出到 BUILD_DIR，
-# 要不要覆蓋到 data/ 是部署決定，見 docs/名冊維護與爬蟲.md 步驟 5）。
-# crawlers/ 被單獨搬走時這個路徑不存在，但也沒有任何爬蟲會用到它。
-DATA_DIR = os.path.join(PKG_ROOT, "data")
 
 # 三張凍結列源名冊（build_authority_master 的唯一輸入）
 FIM = os.path.join(MASTERS_DIR, "financial_institutions_master.csv")
@@ -49,8 +46,3 @@ def raw_dir(run_date=None, create=True):
 
 def baseline(filename):
     return os.path.join(BASELINE_DIR, filename)
-
-
-def ensure_dirs():
-    for p in (MASTERS_DIR, BASELINE_DIR, RAW_DIR, BUILD_DIR):
-        os.makedirs(p, exist_ok=True)

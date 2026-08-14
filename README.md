@@ -224,6 +224,10 @@ py -3.12 tests/test_consistency.py
 
 無外網時加 `--skip-api`，只跑前四項。
 
+另有 `tests/test_v4_golden.py` 驗 v4 值域結構（大類／子類、已移除規則是否徹底移除）
+＋公開個體 golden 個案（證交所、中租迪和等公開機構），可用 `py -3.12 -m pytest tests/`
+與 `test_consistency.py` 一併跑。
+
 ---
 
 ## 目錄結構

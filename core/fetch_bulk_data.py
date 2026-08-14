@@ -10,7 +10,7 @@ r"""下載本地端模式所需的五個公開資料源（全檔）
   gov_local.csv    地方政府機關統一編號      ~94 KB   每月更新
 
 第六個資料源 authority_master.csv（金管會權威名冊 1,343 列）**不是公開下載檔**，
-是由 crawlers/ 的六支爬蟲抓官方名冊後組裝而成，見 crawlers/README.md。
+是由 crawlers/ 的六支爬蟲抓官方名冊後組裝而成，見 docs/名冊維護與爬蟲.md。
 
 用法：
     py -3.12 core/fetch_bulk_data.py              # 只補缺檔或過期檔

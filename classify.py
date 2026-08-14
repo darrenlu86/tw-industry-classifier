@@ -52,8 +52,12 @@ OUTPUT = os.path.join(HERE, "output")
 RULES_VERSION = "v4"
 
 
-def build_provider(mode, offline):
-    """建立 provider。mode=auto 時：資料齊全走 local，否則走 api。"""
+def build_provider(mode, offline, tolerate_api_error=False):
+    """建立 provider。mode=auto 時：資料齊全走 local，否則走 api。
+
+    tolerate_api_error＝True 時 api 模式改用 strict=False：外部 API 重試仍失敗不中斷，
+    該筆改標記 confidence=low 並記入 provider.degraded（見 api/provider.py）。
+    """
     have_tax = os.path.exists(os.path.join(DATA, "BGMOPEN1.zip"))
     have_auth = os.path.exists(os.path.join(DATA, "authority_master.csv"))
     if mode == "auto":
@@ -65,7 +69,7 @@ def build_provider(mode, offline):
     else:
         sys.path.insert(0, os.path.join(HERE, "api"))
         from provider import ApiProvider             # noqa: PLC0415
-        p = ApiProvider(DATA, offline=offline)
+        p = ApiProvider(DATA, offline=offline, strict=not tolerate_api_error)
     p.load_registries(require_authority=True)
     return mode, p
 
@@ -141,6 +145,8 @@ def main():
     ap.add_argument("--input", help="統編清單 CSV（第一欄統編，可選第二欄備用名稱）")
     ap.add_argument("--output", help="輸出 CSV 路徑（預設 output/分類結果.csv）")
     ap.add_argument("--offline", action="store_true", help="不連外，跳過 GCIS 那層")
+    ap.add_argument("--tolerate-api-error", action="store_true",
+                    help="api 模式外部 API 重試仍失敗時不中斷，改標記該筆 confidence=low（預設嚴格中斷）")
     ap.add_argument("--as-of", default="", help="寫入輸出的判定日（預設空白；填了才會出現）")
     ap.add_argument("--json", action="store_true", help="單筆查詢以 JSON 輸出")
     ap.add_argument("--doctor", action="store_true", help="檢查資料就位狀況後結束")
@@ -152,7 +158,7 @@ def main():
         ap.error("請給一個統一編號，或用 --input 指定名單 CSV")
 
     try:
-        mode, provider = build_provider(args.mode, args.offline)
+        mode, provider = build_provider(args.mode, args.offline, args.tolerate_api_error)
     except FileNotFoundError as e:
         sys.exit("資料缺漏：%s\n（可先執行 py -3.12 classify.py --doctor 檢查）" % e)
 
@@ -169,6 +175,10 @@ def main():
             for k, v in shown.items():
                 if v != "":
                     print("  %s：%s" % (k.ljust(width), v))
+        degraded = getattr(provider, "degraded", None)
+        if degraded:
+            warn = "警語：外部 API 查詢降級（%s），已標記 confidence=low" % "、".join(degraded)
+            print(warn, file=sys.stderr if args.json else sys.stdout)
         return
 
     # ── 批次 ─────────────────────────────────────────────────────────────
@@ -208,6 +218,10 @@ def main():
     bad = [r for r in rows if r["子分類"] not in R.SUBGROUPS.get(r["大分類"], [])]
     print("\n值域自我檢查：%d 筆越界" % len(bad))
     print("寫出 %s（%d 列）" % (out_path, len(rows)))
+    degraded = getattr(provider, "degraded", None)
+    if degraded:
+        print("警語：%d 筆外部 API 查詢降級（%s），已標記 confidence=low"
+              % (len(degraded), "、".join(degraded)))
 
 
 if __name__ == "__main__":

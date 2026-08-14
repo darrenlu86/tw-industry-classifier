@@ -29,8 +29,6 @@ enrich_tax_id.py — 統編補全模組（交付版，供 build_authority_master
     1. 從三張既有「純外部事實」列源名冊萃取「官方名稱 → tax_id + tax_id_source」快取，
        寫成 crawlers/masters/tax_id_lookup.csv（**事實承接，不重查**）。
     2. 把查無統編的名稱另存 crawlers/masters/tax_id_pending.csv，留待日後補查。
-    3. 提供查詢介面 lookup_tax_id()（讀快取）與 query_external()（外網查詢佔位，
-       本模組**不打外網**；外網補查由 query_pending_taxids.py 負責）。
 
 列源名冊（凍結，只讀）：
     crawlers/masters/financial_institutions_master.csv  490 列（金融機構）
@@ -186,31 +184,6 @@ def load_lookup():
                 "source_master": row["source_master"],
             }
     return out
-
-
-def lookup_tax_id(name, cache=None):
-    """以官方名稱查快取 → (tax_id, tax_id_source)。查無回 ("", "")。"""
-    if cache is None:
-        cache = load_lookup()
-    e = cache.get((name or "").strip())
-    if not e:
-        return "", ""
-    return e["tax_id"], e["tax_id_source"]
-
-
-def query_external(name, allow_network=False):
-    """外網統編查詢介面（規劃：TWSE OpenAPI t187ap03 → GCIS 商工登記）。
-
-    本模組**不打外網**（外網補查請走 query_pending_taxids.py）：
-        - allow_network=False（預設）→ 回 ("", "", "offline-stub") 不連線。
-        - allow_network=True         → raise NotImplementedError（尚未實作，避免誤觸外網）。
-    """
-    if not allow_network:
-        return "", "", "offline-stub（本模組不打外網；外網補查請走 query_pending_taxids.py）"
-    raise NotImplementedError(
-        "本模組未實作外網統編查詢（只建快取與介面）；"
-        f"外網補查請執行 query_pending_taxids.py。日後端點：{EXTERNAL_ENDPOINTS}"
-    )
 
 
 def _print_overwrite_warning():

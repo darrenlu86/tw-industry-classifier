@@ -31,7 +31,8 @@ r"""API Provider — 打單筆查詢 API，免下載 320 MB 全檔
 ──────────────────────────────────────────────────────────────────────────
 網路錯誤**不會**被當成「查無」。若重試後仍失敗，預設直接拋出 ApiUnavailable，
 讓整批停下來，而不是讓某幾筆因為當下網路狀況被判成別的分類。
-要容忍降級請明確傳 strict=False，屆時該筆會標記 confidence=low。
+要容忍降級請明確傳 strict=False（CLI 對應 classify.py --tolerate-api-error），
+屆時該筆會標記 confidence=low 並列入 self.degraded。
 """
 import json
 import os
@@ -131,7 +132,9 @@ class ApiProvider(ProviderBase):
                     "外部 API 不通時本工具刻意中斷，避免把網路問題誤判成「查無此統編」。\n"
                     "要容忍降級請加 --tolerate-api-error，或改用 --mode local。"
                     % (key, payload, self.retries))
-            self.degraded.append(key)
+            tid = key.split(":", 1)[-1]          # 對外只留統編（去端點前綴、去重）
+            if tid not in self.degraded:
+                self.degraded.append(tid)
             return MISS
         value = "__MISS__" if state == "miss" else payload
         self._cache[key] = value
