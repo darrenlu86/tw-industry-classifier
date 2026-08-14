@@ -5,7 +5,7 @@ r"""產業分類查詢 — 統一入口（本地端與 API 端共用）
 
 產業大類／產業子類為定版單軌（2026-08-11）：身分軌命中者沿用八大分類；
 一般企業改由行業軌（稅籍主行業代號 → A–S 十九大類）回答。
-輸出同時保留身分軌原值（大分類／子分類）供稽核。
+輸出同時保留身分軌原值供稽核，欄名標註「大分類（僅供參考）／子分類（僅供參考）」。
 
 兩種查詢模式，同一套規則、同一個引擎，結果一致：
 
@@ -161,11 +161,12 @@ def main():
         rec = engine.query(args.tax_id, provider, as_of=args.as_of)
         if hasattr(provider, "save_gcis_cache"):
             provider.save_gcis_cache()
+        shown = engine.display(rec)
         if args.json:
-            print(json.dumps(rec, ensure_ascii=False, indent=2))
+            print(json.dumps(shown, ensure_ascii=False, indent=2))
         else:
-            width = max(len(k) for k in rec)
-            for k, v in rec.items():
+            width = max(len(k) for k in shown)
+            for k, v in shown.items():
                 if v != "":
                     print("  %s：%s" % (k.ljust(width), v))
         return
@@ -189,9 +190,10 @@ def main():
     order = {g: i for i, g in enumerate(R.GROUPS)}
     rows.sort(key=lambda r: (order.get(r["大分類"], 99), r["子分類"], r["統一編號"]))
     with open(out_path, "w", encoding="utf-8-sig", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=engine.OUTPUT_COLUMNS)
+        w = csv.DictWriter(f, fieldnames=[engine.DISPLAY_RENAME.get(c, c)
+                                          for c in engine.OUTPUT_COLUMNS])
         w.writeheader()
-        w.writerows(rows)
+        w.writerows(engine.display(r) for r in rows)
 
     from collections import Counter                   # noqa: PLC0415
     print()

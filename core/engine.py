@@ -231,7 +231,8 @@ def query(raw_tax_id, provider, fallback_name="", as_of=""):
 
     產業大類／產業子類＝定版單軌（2026-08-11）：身分軌命中者直接沿用；
     一般企業（名冊查無執照）改走行業軌，由稅籍主行業代號歸 A–S 行業別。
-    大分類／子分類保留身分軌原值，供稽核與八欄版並排比對。
+    大分類／子分類保留身分軌原值，供稽核與八欄版並排比對；對外輸出時
+    欄名標註「僅供參考」（2026-08-13，見 DISPLAY_RENAME／display()）。
     """
     t0 = normalize_tax_id(raw_tax_id)
     tax_id, fix_note = (X.TAX_ID_FIX[t0][0], X.TAX_ID_FIX[t0][1]) if t0 in X.TAX_ID_FIX else (t0, "")
@@ -272,3 +273,12 @@ OUTPUT_COLUMNS = ["統一編號", "官方正式名稱", "產業大類", "產業�
                   "大分類", "子分類", "分類依據詞",
                   "分類依據層", "判定規則", "名稱來源", "登記狀態", "信心",
                   "統編備註", "查詢模式", "資料版本", "判定日"]
+
+# 權威答案是單軌的產業大類／產業子類；身分軌舊欄位對外標註「僅供參考」
+# （2026-08-13）。只改呈現層欄名，程式內部鍵名不變——讀取方仍用原名。
+DISPLAY_RENAME = {"大分類": "大分類（僅供參考）", "子分類": "子分類（僅供參考）"}
+
+
+def display(rec):
+    """query() 結果 → 對外呈現用 dict（套 DISPLAY_RENAME 欄名，欄序不變）。"""
+    return {DISPLAY_RENAME.get(k, k): v for k, v in rec.items()}
