@@ -139,8 +139,8 @@ def count_generic_rules():
 
     本地例外表另計——它的筆數會隨各組織自己的裁決而變，不算通用規則。
     """
-    return (len(R.UID_PREFIX) + 2      # L0：UID 前綴表各一條，加 L0-N／L0-X
-            + 3                        # L1-1／L1-3／L1-2 本地追加，各以一條摘要列表示
+    return (len(R.UID_PREFIX) + 3      # L0：UID 前綴表各一條，加 L0-AA／L0-N／L0-X
+            + 4                        # L1-1／L1-3／L1-3R／L1-2 本地追加，各一條摘要列
             + len(X.PERIPHERAL_BUILTIN)  # L1-2 內建周邊單位白名單（法定公開機構）
             + len(R.REGISTRIES)
             # L3-A 名稱規則，加前置排除／店家型後綴／A3b 延續詞白名單與黑名單各一條

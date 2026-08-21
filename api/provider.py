@@ -175,7 +175,12 @@ class ApiProvider(ProviderBase):
         return (rec.get("unitNm") or "").strip() or None
 
     def company(self, tax_id):
-        """GCIS 公司登記：稅籍查無時補名稱與登記狀態（已解散、外商在台等）。"""
+        """GCIS 公司登記：稅籍查無時補名稱與登記狀態（已解散、外商在台等）。
+
+        另帶停業三欄（`Case_Status_Desc`／`Sus_Beg_Date`／`Sus_End_Date`）。
+        停業與解散是兩回事——停業戶只在輸出的「登記狀態」欄如實透出，
+        不參與任何分類判定，見 core/engine.py 的 _suspension_label()。
+        """
         url = GCIS_COMPANY + "?$format=json&$filter=" + urllib.parse.quote(
             "Business_Accounting_NO eq " + tax_id)
         rec = self._cached("company:" + tax_id, lambda: self._get(url))
@@ -183,7 +188,10 @@ class ApiProvider(ProviderBase):
             return None
         row = rec[0] if isinstance(rec, list) else rec
         return {"name": (row.get("Company_Name") or "").strip(),
-                "status": (row.get("Company_Status_Desc") or "").strip()}
+                "status": (row.get("Company_Status_Desc") or "").strip(),
+                "case_status": (row.get("Case_Status_Desc") or "").strip(),
+                "sus_beg": (row.get("Sus_Beg_Date") or "").strip(),
+                "sus_end": (row.get("Sus_End_Date") or "").strip()}
 
     def save_gcis_cache(self):
         """存快取（沿用 local provider 的方法名，供 CLI 統一呼叫）。"""

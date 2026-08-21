@@ -149,7 +149,11 @@ class LocalProvider(ProviderBase):
         """GCIS 公司登記：補「稅籍查無」者的名稱（已解散、廢止、外商在台）。
 
         與 API 模式走同一個端點與同一個順序，兩種模式才會判出相同結果。
-        offline 時回 None，該筆改用備用名稱並在輸出標記。
+        offline 時**先看快取**，沒有才回 None，該筆改用備用名稱並在輸出標記。
+
+        回傳含停業三欄（case_status／sus_beg／sus_end）。舊快取只存了
+        name／status，缺的欄位讀出來是空的——**刻意不因此重打 API**，
+        那會為了一個純資訊欄位把幾千筆快取全部作廢。
         """
         key = "company:" + tax_id
         if key in self._gcis:
@@ -164,7 +168,10 @@ class LocalProvider(ProviderBase):
                 raw = r.read().decode("utf-8", "replace")
             data = json.loads(raw) if raw.strip() and not raw.startswith("非授權") else []
             rec = ({"name": (data[0].get("Company_Name") or "").strip(),
-                    "status": (data[0].get("Company_Status_Desc") or "").strip()}
+                    "status": (data[0].get("Company_Status_Desc") or "").strip(),
+                    "case_status": (data[0].get("Case_Status_Desc") or "").strip(),
+                    "sus_beg": (data[0].get("Sus_Beg_Date") or "").strip(),
+                    "sus_end": (data[0].get("Sus_End_Date") or "").strip()}
                    if data else {})
             self._gcis[key] = rec
             time.sleep(0.3)

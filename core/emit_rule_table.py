@@ -38,6 +38,10 @@ def add(rid, layer, source, key, cond, group, sub, conf, note=""):
 # ── L0 ────────────────────────────────────────────────────────────────────
 # UID 前綴表刻意以通用措辭描述：它是可設定的對照表（rules.UID_PREFIX），
 # 換一個組織換一組前綴，文件不用重寫。
+add("L0-AA", "L0 統編解析", "財政部外國機構統編配賦（格式規則，不帶名冊）", "統一編號",
+    "符合 %s（不分大小寫）" % R.UID_SPECIAL_PATTERN,
+    R.UID_SPECIAL_GROUP, R.UID_SPECIAL_SUB, "high",
+    "使領館與駐台辦事處無公司登記，另配賦 AA＋3 碼特種統編。命中即終結")
 for _prefix, _group in sorted(R.UID_PREFIX.items()):
     add("L0-%s" % _prefix, "L0 統編解析", "輸入值本身", "統一編號首碼",
         "= %s（不分大小寫）" % _prefix, _group, "（空白）", "high",
@@ -55,9 +59,10 @@ add("L0-X", "L0 統編解析", "輸入值本身", "統一編號",
 # 這裡只記「有這一層、目前幾筆」；內容由使用者自己在
 # exceptions/local_exceptions.json 維護，格式見 exceptions/README.md。
 add("L1-1", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
-    "命中統編修正表（目前 %d 筆）" % len(X.TAX_ID_FIX),
-    "（先改判統編後重跑）", "—", "high",
-    "帳務系統的佔位碼或已知錯碼 → 正確統編。內容不進版控")
+    "命中統編歸戶表（目前 %d 筆）" % len(X.TAX_ID_FIX),
+    "（改用歸戶統編查詢後續各層）", "—", "high",
+    "查詢重導向，**不改寫輸出的統一編號**（輸出保留輸入原值，否則 join 不回原始報表）；"
+    "統編備註記「統編歸戶：查詢採 …」。內容不進版控")
 for tid, (name, peri_group) in sorted(X.PERIPHERAL_BUILTIN.items()):
     add("L1-2", "L1 特殊規則", "內建白名單（core/exceptions.py）",
         "統一編號", "= %s" % tid, peri_group, "周邊單位", "high", name)
@@ -69,6 +74,12 @@ add("L1-3", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.js
     "命中已裁決例外表（目前 %d 筆）" % len(X.OVERRIDE),
     "（依裁決值）", "（依裁決值）", "high",
     "名冊或稅籍碼判定與事實不符時的人工裁決，每筆附理由與日期。內容不進版控")
+add("L1-3R", "L1 特殊規則", "同上", "裁決值形態",
+    "大分類填 A–S 十九大類或「%s」（行業軌值形態）" % R.UNMAPPED_SECTION,
+    "一般企業", "未細分", "high",
+    "單軌直接採裁決值（子分類不受 SUBGROUPS 限制），身分軌降為一般企業／未細分。"
+    "僅應用於官方來源全查無的戶——對有稅籍者填會蓋掉稅籍，見 exceptions/README.md 警語。"
+    "登記狀態為解散類時仍由 L3-D 覆寫")
 
 # ── L2 ────────────────────────────────────────────────────────────────────
 for reg in R.REGISTRIES:

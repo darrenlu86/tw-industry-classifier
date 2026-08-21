@@ -52,7 +52,7 @@ GROUP_PRIORITY_DEFAULT = 9
 
 
 def resolve_name(tax_id, provider, fallback_name=""):
-    """回傳 (官方正式名稱, 名稱來源, 登記狀態)。與分類判定完全獨立。
+    """回傳 (官方正式名稱, 名稱來源)。與分類判定完全獨立。
 
     優先序：稅籍 → 機關名冊 → 學校名冊 → 非營利名冊 → L1-4 存量凍結表
             → 金管會名冊 → L2-5 上市櫃名冊 → GCIS 公司登記
@@ -60,36 +60,34 @@ def resolve_name(tax_id, provider, fallback_name=""):
 
     GCIS 排在最後一個官方來源，用途是補「稅籍查無」的兩種現實情況：已解散或廢止的
     公司、以及外商在台（無台灣稅籍登記）。兩種模式都走同一順序，故結果一致；
-    本地端如指定 offline，GCIS 這步會回 None，該筆改用備用名稱並標記。
+    本地端如指定 offline，GCIS 這步會先看快取、沒有才回 None，該筆改用備用名稱並標記。
 
-    登記狀態只有 GCIS 這一步給得出來，且**呼叫過就一定帶回**——不能因為呼叫端
-    當下只想要名稱就把它丟掉。丟掉的後果是已廢止的機構在具名大類（銀行、保險等）
-    輸出「登記狀態空白＋信心 medium」，看起來像正常存續戶。
+    本函式**只負責名稱**。登記狀態統一由 registration_status() 讀——
+    狀態散在兩個地方讀過一次，就出過「某條路徑忘了帶狀態」的漏洞。
     """
     t = provider.tax(tax_id)
     if t and t.get("name"):
-        return t["name"], "稅籍(財政部)", ""
+        return t["name"], "稅籍(財政部)"
     for getter, label in ((provider.gov, "機關名冊"),
                           (provider.school, "學校名冊"),
                           (provider.nonprofit, "非營利名冊")):
         nm = getter(tax_id)
         if nm:
-            return nm, label, ""
+            return nm, label
     if tax_id in X.FROZEN_NAMES:
-        nm, src = X.FROZEN_NAMES[tax_id]
-        return nm, src, ""
+        return X.FROZEN_NAMES[tax_id]
     rows = provider.authority(tax_id)
     if rows:
         nm = (rows[0].get("customer_name") or "").strip()
         if nm:
-            return nm, "金管會名冊", ""
+            return nm, "金管會名冊"
     lst = provider.listed(tax_id)                     # 上市櫃名冊帶官方全銜，早於 GCIS
     if lst and lst.get("name"):
-        return lst["name"], "上市櫃名冊", ""
+        return lst["name"], "上市櫃名冊"
     comp = provider.company(tax_id)
     if comp and comp.get("name"):
-        return comp["name"], "GCIS商工登記", (comp.get("status") or "").strip()
-    return fallback_name, "帳務名(待補官方全銜)", ""
+        return comp["name"], "GCIS商工登記"
+    return fallback_name, "帳務名(待補官方全銜)"
 
 
 def _pick_authority_row(rows):
@@ -188,6 +186,10 @@ def classify_uid(raw_uid, name):
     絕不往下走名冊、稅籍或名稱規則——F 碼的「○○銀行東京分行」若走到 L3-8 的 N12，
     會被判成本國銀行（v4 實際發生過的錯）。
     """
+    if re.match(R.UID_SPECIAL_PATTERN, raw_uid, re.I):
+        return Verdict(R.UID_SPECIAL_GROUP, R.UID_SPECIAL_SUB, "L0 統編解析",
+                       "L0-AA 特種統編 %s（外國駐台機構）" % raw_uid.upper(),
+                       R.UID_SPECIAL_BASIS, "high"), ""
     prefix = raw_uid[:1].upper()                      # 首碼一律轉大寫比對；真統編全是數字
     if prefix in R.UID_PREFIX:
         group = R.UID_PREFIX[prefix]
@@ -348,6 +350,16 @@ def _industry_fallback(provider, tax_id):
     return Verdict(lst["section"], lst["ind_name"], "L2-5 上市櫃名冊", rule, basis, "high")
 
 
+def lookup_tax_id(tax_id):
+    """統編歸戶（L1-1）：回實際拿去查詢的統編。別名表未命中就回原值。
+
+    注意這是**查詢重導向**，不是改寫：輸出欄位的統一編號一律保留呼叫端傳進來的
+    原值，否則分類結果 join 不回原始報表——同一實體有兩個統編時（例如境外母公司
+    與台灣辦事處各有一個），戶鍵由呼叫端決定，本工具不替它決定。
+    """
+    return X.TAX_ID_FIX[tax_id][0] if tax_id in X.TAX_ID_FIX else tax_id
+
+
 def is_dissolved(status):
     """登記狀態是否代表非存續戶（解散／廢止／撤銷／撤回）。"""
     return bool(status) and any(w in status for w in R.DISSOLVED_STATUS_WORDS)
@@ -371,37 +383,50 @@ def names_match(a, b):
     return ca == cb or ca in cb or cb in ca
 
 
-def registration_status(provider, tax_id, known="", resolved_name="", name_source=""):
-    """回 (登記狀態, 統編備註)。稅籍查無時補問一次 GCIS，並做名稱一致性守門。
+def _suspension_label(comp):
+    """停業註記：「停業（迄 <民國日期>）」或空字串。
 
-    為什麼還要補問：resolve_name 只有在走到最後一步才會碰 GCIS，
-    名稱若由機關、金管會或上市櫃名冊解出就提早回傳了——那些戶一樣可能已經解散。
+    停業與解散是兩回事：停業戶還在，只是暫時不營業。所以這個值**只透出到
+    「登記狀態」欄**，不參與 L3-D、不改分類、不降信心。
+    """
+    if "停業" not in (comp.get("case_status") or ""):
+        return ""
+    end = (comp.get("sus_end") or "").strip()
+    return "停業（迄 %s）" % end if end else "停業"
+
+
+def registration_status(provider, tax_id, frozen="", resolved_name="", name_source=""):
+    """回 (登記狀態, 停業註記, 統編備註)。稅籍查無時查一次 GCIS，並做名稱一致性守門。
+
+    登記狀態的**唯一**讀取點。名稱解析（resolve_name）也會碰到 GCIS，但它只負責
+    名稱——狀態統一在這裡讀，才不會出現「某條路徑忘了帶狀態」的漏洞。
     稅籍查得到就不問：稅籍檔只收營業中資料，還在裡面就代表還在營業。
-    tax() 與 company() 兩邊都有快取，這裡不會產生重複查詢。
+    tax() 與 company() 兩邊都有快取，這裡不會產生重複查詢；離線時 provider
+    自己會先看快取、沒有才回 None。
 
     為什麼要守門：**統編會重號**。機關的統編可能與某家已解散的歷史公司撞號，
     此時 GCIS 回的是那家公司的狀態，套到機關身上就會把現存機關標成已解散
     （實例：某分署的統編在 GCIS 是一家已解散的企業社）。所以名稱來源若是
     別的官方名冊，就要求 GCIS 記錄的名稱對得上解析出來的名稱才採信；
-    對不上則不採用該狀態，並在統編備註如實寫明看到了什麼。
+    對不上則兩個值都不採用，並在統編備註如實寫明看到了什麼。
 
-    L1-5 凍結表（`known`）是人工查證值，不受此守門限制。
+    L1-5 凍結表（`frozen`）是人工查證值，不需連線也不受守門限制。
     """
-    if known:
-        return known, ""
+    if frozen:
+        return frozen, "", ""
     if provider.tax(tax_id):                          # 稅籍還在＝存續中
-        return "", ""
-    if getattr(provider, "offline", False):
-        return "", ""
+        return "", "", ""
     comp = provider.company(tax_id) or {}
     status = (comp.get("status") or "").strip()
-    if not status or name_source in STATUS_TRUSTED_NAME_SOURCES:
-        return status, ""
-    gcis_name = (comp.get("name") or "").strip()
-    if names_match(gcis_name, resolved_name):
-        return status, ""
-    return "", "GCIS 同號記錄名稱不符（%s／%s），未採用其狀態" % (
-        gcis_name or "無名稱", status)
+    suspension = _suspension_label(comp)
+    if not (status or suspension):
+        return "", "", ""
+    if name_source not in STATUS_TRUSTED_NAME_SOURCES:
+        gcis_name = (comp.get("name") or "").strip()
+        if not names_match(gcis_name, resolved_name):
+            return "", "", "GCIS 同號記錄名稱不符（%s／%s），未採用其狀態" % (
+                gcis_name or "無名稱", status or suspension)
+    return status, suspension, ""
 
 
 def query(raw_tax_id, provider, fallback_name="", as_of=""):
@@ -417,25 +442,37 @@ def query(raw_tax_id, provider, fallback_name="", as_of=""):
     v, fix_note = classify_uid(t0, fallback_name)     # L0：非 8 碼統編在此終結
     if v is not None:
         # L0 終結者不查任何名冊／稅籍／GCIS：名稱只能用呼叫端帶進來的帳務名。
-        tax_id, status = t0, ""
+        tax_id, out_id, status = t0, t0, ""
         name = fallback_name
         name_source = "帳務名(待補官方全銜)" if name else "查無官方名稱"
         ind_group, ind_sub = v.group, v.sub
+        id_group, id_sub = v.group, v.sub
         layer, rule, basis, confidence = v.layer, v.rule, v.basis, v.confidence
     else:
-        tax_id, fix_note = ((X.TAX_ID_FIX[t0][0], X.TAX_ID_FIX[t0][1])
-                            if t0 in X.TAX_ID_FIX else (t0, ""))
-        name, name_source, gcis_status = resolve_name(tax_id, provider, fallback_name)
+        # L1-1 統編歸戶：修正值只用來查詢，輸出的統一編號保留輸入原值。
+        out_id, tax_id, fix_note = t0, lookup_tax_id(t0), ""
+        if tax_id != t0:
+            fix_note = "統編歸戶：查詢採 %s（%s）" % (
+                tax_id, X.TAX_ID_FIX[t0][1].split("；")[0])
+        name, name_source = resolve_name(tax_id, provider, fallback_name)
         v = classify(tax_id, name, provider)
+        id_group, id_sub = v.group, v.sub
         layer, rule, basis, confidence = v.layer, v.rule, v.basis, v.confidence
         # 凍結表優先於 GCIS 即時值（人工查證過）；GCIS 狀態不分大類一律如實帶出，
         # 具名大類（銀行、保險等）也要——已廢止的機構不能看起來像正常存續戶。
         frozen = X.FROZEN_STATUS.get(tax_id, "")
-        status, status_note = registration_status(
-            provider, tax_id, frozen or gcis_status, name, name_source)
+        status, suspension, status_note = registration_status(
+            provider, tax_id, frozen, name, name_source)
         if status_note:                               # 統編重號：如實記，不靜默丟掉
             fix_note = "；".join(x for x in (fix_note, status_note) if x)
-        if v.layer == "L3-A 制度性名稱" and v.sub == "醫療":
+        # L1-3 填的是行業軌值（官方來源全查無時的人工查證結果）：單軌直接採用，
+        # 身分軌降為一般企業／未細分——人工填的是「做什麼」，不是「是什麼身分」。
+        manual_industry = (v.layer == "L1 特殊規則"
+                           and v.group in R.OVERRIDE_INDUSTRY_VALUES)
+        if manual_industry:
+            ind_group, ind_sub = v.group, v.sub
+            id_group, id_sub = R.FALLBACK[0], R.FALLBACK[1]
+        elif v.layer == "L3-A 制度性名稱" and v.sub == "醫療":
             ind_group, ind_sub = R.MEDICAL_SECTION    # 醫院／診所直接對到行業軌 Q／86
         elif v.group == "一般企業":                   # 定版單軌：一般企業走行業軌
             ind_group, ind_sub = industry_track(provider, tax_id)
@@ -453,14 +490,23 @@ def query(raw_tax_id, provider, fallback_name="", as_of=""):
         # 已廢止的銀行與已解散的公司，在「這家還在不在」這個問題上是同一件事，
         # 所以單軌一律標歷史戶。身分軌（大分類／子分類）保留原群組值供稽核——
         # 那回答的是「它是什麼」，與「它還在不在」是兩個問題。
+        # L3-D 解散覆寫**優先於 L1-3 行業軌值**（指揮官 2026-08-21 裁定）：
+        # 「已解散」回答的是「這家還在不在」，與那一戶的產業是人工填的還是引擎判的無關，
+        # 全域維持單一語意。人工裁決填的產業仍保留在依據詞的來源脈絡裡供稽核。
         if is_dissolved(status):
             ind_group, ind_sub = R.DISSOLVED_SECTION, ""
             layer = "L3-D GCIS 登記狀態"
             rule = "L3-D 登記狀態「%s」（%s，非存續戶）" % (
                 status, "L1-5 凍結表" if frozen else "GCIS 商工登記")
             basis = "GCIS 登記狀態：%s" % status
-        if status and status not in ("核准設立", "核准登記"):
+            manual_industry = False                   # 已由 L3-D 接手，降級照常套用
+        # 非解散的登記狀態（停業等）不推翻人工填的行業軌值，也不因此降級。
+        if status and status not in ("核准設立", "核准登記") and not manual_industry:
             confidence = "low"
+        # 停業：純資訊透出。走到這裡才覆寫顯示值，確保上面的判定與降級用的都是
+        # 原始登記狀態（停業戶多半是「核准設立」，本來就不該降級）。
+        if suspension and not is_dissolved(status):
+            status = suspension
         if not name:                                 # 名稱完全查不到時誠實標記
             name_source = "查無官方名稱"
             confidence = "low"
@@ -468,12 +514,12 @@ def query(raw_tax_id, provider, fallback_name="", as_of=""):
            for k in getattr(provider, "degraded", ())):  # 任一端點失敗＝判定基礎不完整
         confidence = "low"
     return {
-        "統一編號": tax_id,
+        "統一編號": out_id,                           # 輸入原值；查詢用的是 tax_id
         "官方正式名稱": name,
         "產業大類": ind_group,
         "產業子類": ind_sub,
-        "大分類": v.group,
-        "子分類": v.sub,
+        "大分類": id_group,
+        "子分類": id_sub,
         "分類依據詞": basis,
         "分類依據層": layer,
         "判定規則": rule,

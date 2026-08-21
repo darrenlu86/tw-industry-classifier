@@ -54,11 +54,11 @@ UNTRACKED_BASIS = "名冊查無：金管會／機關／學校／非營利名冊�
 def eight_columns(provider, raw_tax_id, raw_industry=""):
     """一筆輸入 → 八欄 list。"""
     rec = engine.query(raw_tax_id, provider)
-    tid = rec["統一編號"]                             # 已套用統編修正表
+    tid = rec["統一編號"]                             # 輸入原值（L1-1 不改寫輸出鍵）
     if rec["分類依據層"].startswith("L0"):            # L0 終結者沒有 8 碼統編，行業軌不適用
         section, major2 = "", ""
-    else:
-        section, major2 = engine.industry_track(provider, tid)
+    else:                                             # 行業軌查詢比照引擎走歸戶後的統編
+        section, major2 = engine.industry_track(provider, engine.lookup_tax_id(tid))
     # 依據詞去尾端空白：引擎對超長裁決理由做 head[:40] 截斷，切點可能落在空白後
     group, sub, basis = rec["大分類"], rec["子分類"], rec["分類依據詞"].rstrip()
     if group == "一般企業":

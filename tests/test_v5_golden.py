@@ -122,6 +122,21 @@ def test_l0_f_code_never_reaches_name_rules():
         "F 碼進了名稱關鍵字層，實得 %s／%s（層 %s）" % got
 
 
+def test_l0_special_foreign_mission_code():
+    """AA＋3 碼＝外國駐台機構的特種統編（財政部配賦），不分大小寫，命中即終結。"""
+    for uid in ("AA104", "aa104", "AA001", "AA136"):
+        rec = engine.query(uid, FakeProvider(), fallback_name="某駐台辦事處")
+        assert (rec["大分類"], rec["子分類"]) == ("境外法人（無台灣登記）", "外國駐台機構"), \
+            "%s → %s／%s" % (uid, rec["大分類"], rec["子分類"])
+        assert rec["分類依據層"] == "L0 統編解析"
+        assert rec["信心"] == "high"
+        assert rec["子分類"] in R.SUBGROUPS[rec["大分類"]], "值域自我檢查要通過"
+    # 格式不符者不得誤中
+    for uid in ("A1234567", "AA12", "AA1234", "AAB01", "22099131"):
+        rec = engine.query(uid, FakeProvider(offline=True))
+        assert rec["子分類"] != "外國駐台機構", "%s 不該判成外國駐台機構" % uid
+
+
 def test_l0_blank_without_table():
     """統編空白且歸戶表查無 → 無法分類（不是靜默丟掉，也不是兜底一般企業）。"""
     for blank in ("", "  ", "N/A", "-"):
@@ -153,6 +168,68 @@ def test_l0_format_error():
     assert rec["產業大類"] == "無法分類"
     assert rec["統編備註"] == R.UID_FORMAT_NOTE
     assert rec["判定規則"].startswith("L0-X")
+
+
+# ── L1-1 統編歸戶＝查詢重導向（使用者 2026-08-21 語意變更）────────────────
+def _with_tax_id_fix(alias, target, why):
+    saved = dict(X.TAX_ID_FIX)
+    X.TAX_ID_FIX[alias] = (target, why)
+    return saved
+
+
+def test_tax_id_fix_redirects_lookup_but_keeps_key():
+    """別名 A→B：查詢用 B，輸出的統一編號保留 A，備註寫明歸戶。
+
+    改寫輸出鍵會讓分類結果 join 不回原始報表（原鍵直接消失），
+    同實體雙統編時戶鍵由呼叫端決定，本工具不替它決定。
+    """
+    tax = {"87654321": {"name": "測試電子股份有限公司", "org": "",
+                        "codes": [("271000", "電腦電子產品製造")]}}
+    saved = _with_tax_id_fix("11112222", "87654321",
+                             "舊統編，帳務端沿用開單；現行為 87654321；2026-08-21 核定")
+    try:
+        rec = engine.query("11112222", FakeProvider(tax=tax), fallback_name="測試電子")
+        assert rec["統一編號"] == "11112222", "輸出鍵必須是輸入原值，實得 %s" % rec["統一編號"]
+        assert rec["官方正式名稱"] == "測試電子股份有限公司", "名稱應取自歸戶後的統編"
+        assert rec["產業大類"] == "C 製造業", "分類應取自歸戶後的統編"
+        assert rec["統編備註"].startswith("統編歸戶：查詢採 87654321（"), rec["統編備註"]
+        assert "舊統編，帳務端沿用開單" in rec["統編備註"], "備註要帶理由第一段"
+        assert "；" not in rec["統編備註"].split("（", 1)[1][:-1], "理由只取第一段"
+    finally:
+        X.TAX_ID_FIX.clear()
+        X.TAX_ID_FIX.update(saved)
+
+
+def test_tax_id_fix_both_keys_survive_batch():
+    """批次同時含別名 A 與目標 B：兩列都在、鍵不重複也不消失。"""
+    tax = {"87654321": {"name": "測試電子股份有限公司", "org": "",
+                        "codes": [("271000", "電腦電子產品製造")]}}
+    saved = _with_tax_id_fix("11112222", "87654321", "舊統編；2026-08-21 核定")
+    try:
+        p = FakeProvider(tax=tax)
+        rows = [engine.query(t, p) for t in ("11112222", "87654321")]
+        keys = [r["統一編號"] for r in rows]
+        assert keys == ["11112222", "87654321"], "兩個鍵都要在且不互相取代，實得 %s" % keys
+        assert len(set(keys)) == 2, "鍵不得重複"
+        # 兩列的分類結果相同（同一實體），但只有別名列帶歸戶備註
+        assert rows[0]["產業大類"] == rows[1]["產業大類"] == "C 製造業"
+        assert rows[0]["統編備註"].startswith("統編歸戶：")
+        assert rows[1]["統編備註"] == ""
+    finally:
+        X.TAX_ID_FIX.clear()
+        X.TAX_ID_FIX.update(saved)
+
+
+def test_lookup_tax_id_helper():
+    """歸戶查表本身：命中回修正值，未命中回原值。引擎與 emit 共用同一份邏輯。"""
+    saved = _with_tax_id_fix("11112222", "87654321", "測試")
+    try:
+        assert engine.lookup_tax_id("11112222") == "87654321"
+        assert engine.lookup_tax_id("87654321") == "87654321"
+        assert engine.lookup_tax_id("22099131") == "22099131"
+    finally:
+        X.TAX_ID_FIX.clear()
+        X.TAX_ID_FIX.update(saved)
 
 
 def test_l0_zero_pad_still_works():
@@ -522,6 +599,20 @@ def test_l3_d_dissolved_status():
     assert "各層皆未命中" not in rec["判定規則"]
 
 
+def test_l3_d_liquidation_and_bankruptcy_status():
+    """終局狀態不含「解散」四詞的兩種實例（重整完成暨清算完結／破產）也要判歷史戶。
+
+    2026-08-22 實資料補列：歌林＝「重整完成暨清算完結」、佳晶＝「破產」，
+    原四詞（解散/廢止/撤銷/撤回）都比對不到，曾漏留在未登記。
+    """
+    for status in ("重整完成暨清算完結", "破產"):
+        comp = {"87654321": {"name": "測試終局狀態股份有限公司", "status": status}}
+        rec = engine.query("87654321", FakeProvider(company=comp))
+        assert rec["產業大類"] == R.DISSOLVED_SECTION, (status, rec["產業大類"])
+        assert rec["登記狀態"] == status
+        assert rec["信心"] == "low"
+
+
 def test_named_group_dissolved_status():
     """具名大類（銀行等）＋解散狀態 → 單軌改標歷史戶，身分軌保留原群組。
 
@@ -544,6 +635,112 @@ def test_named_group_dissolved_status():
     assert rec["名稱來源"] == "GCIS商工登記"
     assert rec["分類依據層"] == "L3-D GCIS 登記狀態", rec["分類依據層"]
     assert "GCIS 商工登記" in rec["判定規則"], rec["判定規則"]
+
+
+# ── L1-3 override 的兩種值形態（使用者 2026-08-21 放寬行業軌覆寫）─────────
+def _with_override(tax_id, value):
+    """暫時塞一筆 override，用完還原。"""
+    saved = dict(X.OVERRIDE)
+    X.OVERRIDE[tax_id] = value
+    return saved
+
+
+def test_override_industry_track_value():
+    """override 填 A–S 行業軌值：單軌直接採用，身分軌降為一般企業／未細分。
+
+    用途是替「官方來源全查無」的戶填空白——稅籍、各名冊、上市櫃、GCIS 都答不出來時，
+    人工查證的結果總得有地方填。
+    """
+    saved = _with_override("87654321",
+                           ("C 製造業", "26 電子零組件製造",
+                            "人工查證：實際從事印刷電路板製造；官方各來源皆查無", "2026-08-21"))
+    try:
+        rec = engine.query("87654321", FakeProvider(offline=True), fallback_name="測試電子廠")
+        assert (rec["產業大類"], rec["產業子類"]) == ("C 製造業", "26 電子零組件製造"), \
+            "單軌應採 override 值，實得 %s／%s" % (rec["產業大類"], rec["產業子類"])
+        assert (rec["大分類"], rec["子分類"]) == ("一般企業", "未細分"), \
+            "身分軌應降為一般企業／未細分，實得 %s／%s" % (rec["大分類"], rec["子分類"])
+        assert rec["分類依據層"] == "L1 特殊規則"
+        assert rec["判定規則"].startswith("L1-3")
+        assert rec["分類依據詞"].startswith("人工裁決：")
+        assert rec["信心"] == "high"
+        # 值域自我檢查：身分軌形態必須合法
+        assert rec["子分類"] in R.SUBGROUPS[rec["大分類"]]
+    finally:
+        X.OVERRIDE.clear()
+        X.OVERRIDE.update(saved)
+
+
+def test_override_unmapped_value_and_free_text_sub():
+    """override 也可填單軌「其他」，子分類不受身分軌值域限制（可任意描述或空白）。"""
+    saved = _with_override("87654321",
+                           ("其他", "宗教及類似組織", "人工查證：宗教財團法人附屬事業", "2026-08-21"))
+    try:
+        rec = engine.query("87654321", FakeProvider(offline=True), fallback_name="測試單位")
+        assert (rec["產業大類"], rec["產業子類"]) == ("其他", "宗教及類似組織")
+        assert (rec["大分類"], rec["子分類"]) == ("一般企業", "未細分")
+        assert rec["子分類"] in R.SUBGROUPS[rec["大分類"]], "值域自我檢查要通過"
+    finally:
+        X.OVERRIDE.clear()
+        X.OVERRIDE.update(saved)
+    # 子分類留空也合法
+    saved = _with_override("87654321", ("N 支援服務業", "", "人工查證：人力派遣", "2026-08-21"))
+    try:
+        rec = engine.query("87654321", FakeProvider(offline=True), fallback_name="測試單位")
+        assert (rec["產業大類"], rec["產業子類"]) == ("N 支援服務業", "")
+    finally:
+        X.OVERRIDE.clear()
+        X.OVERRIDE.update(saved)
+
+
+def test_dissolved_beats_industry_track_override():
+    """L3-D 解散覆寫優先於 L1-3 行業軌值（指揮官 2026-08-21 裁定，全域單一語意）。
+
+    「已解散」回答的是「這家還在不在」，與那一戶的產業是人工填的還是引擎判的無關。
+    形態 (A) 身分軌值本來就是這個行為，形態 (B) 對齊。
+    """
+    comp = {"87654321": {"name": "測試電子廠股份有限公司", "status": "解散"}}
+    saved = _with_override("87654321",
+                           ("C 製造業", "26 電子零組件製造",
+                            "人工查證：實際從事印刷電路板製造", "2026-08-21"))
+    try:
+        rec = engine.query("87654321", FakeProvider(company=comp))
+        assert rec["產業大類"] == R.DISSOLVED_SECTION, \
+            "解散應覆寫人工填的行業軌值，實得 %s" % rec["產業大類"]
+        assert rec["產業子類"] == ""
+        assert rec["分類依據層"] == "L3-D GCIS 登記狀態"
+        assert rec["登記狀態"] == "解散"
+        assert rec["信心"] == "low", "由 L3-D 接手後降級照常套用"
+    finally:
+        X.OVERRIDE.clear()
+        X.OVERRIDE.update(saved)
+
+
+def test_override_identity_track_value_unchanged():
+    """迴歸：override 填身分軌值時行為完全不變（單軌沿用身分軌，不降級）。"""
+    saved = _with_override("87654321",
+                           ("證券期貨", "證券商", "測試裁決：業務往來主體為證券子公司", "2026-08-21"))
+    try:
+        rec = engine.query("87654321", FakeProvider(offline=True), fallback_name="測試投資公司")
+        assert (rec["大分類"], rec["子分類"]) == ("證券期貨", "證券商")
+        assert (rec["產業大類"], rec["產業子類"]) == ("證券期貨", "證券商"), \
+            "身分軌命中者單軌應沿用，實得 %s／%s" % (rec["產業大類"], rec["產業子類"])
+        assert rec["分類依據層"] == "L1 特殊規則"
+    finally:
+        X.OVERRIDE.clear()
+        X.OVERRIDE.update(saved)
+
+
+def test_override_industry_values_are_verbatim_sections():
+    """行業軌 override 白名單必須逐字取自既有 SECTION_RANGES，不另造字串。"""
+    assert "C 製造業" in R.OVERRIDE_INDUSTRY_VALUES
+    assert R.UNMAPPED_SECTION in R.OVERRIDE_INDUSTRY_VALUES
+    assert len(R.OVERRIDE_INDUSTRY_VALUES) == len(R.SECTION_RANGES) + 1
+    # 引擎判出來的狀態值不開放人工填
+    assert R.TAX_MISSING_SECTION not in R.OVERRIDE_INDUSTRY_VALUES
+    assert R.DISSOLVED_SECTION not in R.OVERRIDE_INDUSTRY_VALUES
+    # 錯字不會被當成行業軌值——會落回身分軌形態，由值域自我檢查抓出來
+    assert "C製造業" not in R.OVERRIDE_INDUSTRY_VALUES
 
 
 def test_duplicate_taxid_does_not_flip_live_agency():
@@ -587,6 +784,57 @@ def test_names_match_tolerates_abbreviation():
     assert engine.names_match("測試 企業 有限公司", "測試企業有限公司")     # 空白差異
     assert not engine.names_match("測試乙企業有限公司", "測試部測試發展署測試分署")
     assert not engine.names_match("", "測試企業有限公司")                  # 無從比對＝不算符合
+
+
+def test_suspension_is_information_only():
+    """停業＝純資訊透出：登記狀態如實寫，但分類與信心完全不受影響。
+
+    停業戶還在，只是暫時不營業——不是解散，不該觸發 L3-D，也不該降級。
+    """
+    tax = {"87654321": {"name": "測試工程股份有限公司", "org": "",
+                        "codes": [("271000", "電腦電子產品製造")]}}
+    comp = {"87654321": {"name": "測試工程股份有限公司", "status": "核准設立",
+                         "case_status": "停業", "sus_beg": "1141130", "sus_end": "1151129"}}
+    # 稅籍查得到 → 根本不問 GCIS，登記狀態留空（現行語意：還在稅籍＝還在營業）
+    rec = engine.query("87654321", FakeProvider(tax=tax, company=comp))
+    assert rec["登記狀態"] == ""
+    assert rec["產業大類"] == "C 製造業"
+    # 稅籍查無 → 透出停業，但分類與信心不動
+    rec = engine.query("87654321", FakeProvider(company=comp), fallback_name="測試工程")
+    assert rec["登記狀態"] == "停業（迄 1151129）", rec["登記狀態"]
+    assert rec["產業大類"] != R.DISSOLVED_SECTION, "停業不是解散，不得觸發 L3-D"
+    assert rec["產業大類"] == R.TAX_MISSING_SECTION
+    assert not rec["分類依據層"].startswith("L3-D")
+    # 「不降級」＝與沒有停業資訊的同一筆相比，信心與分類完全一樣
+    # （這一筆本來就是 L4 兜底的 low，那是兜底造成的，不是停業造成的）
+    plain = {"87654321": {"name": "測試工程股份有限公司", "status": "核准設立"}}
+    base = engine.query("87654321", FakeProvider(company=plain), fallback_name="測試工程")
+    assert (rec["信心"], rec["產業大類"], rec["分類依據層"]) == \
+           (base["信心"], base["產業大類"], base["分類依據層"]), "停業改變了判定"
+    # 沒有迄日時只寫「停業」
+    comp2 = {"87654321": {"name": "測試工程股份有限公司", "status": "核准設立",
+                          "case_status": "停業", "sus_beg": "", "sus_end": ""}}
+    rec = engine.query("87654321", FakeProvider(company=comp2), fallback_name="測試工程")
+    assert rec["登記狀態"] == "停業"
+
+
+def test_suspension_respects_name_gate():
+    """統編重號守門對停業資訊同樣適用：名稱不符就不採用。"""
+    comp = {"87654321": {"name": "測試乙企業有限公司", "status": "核准設立",
+                         "case_status": "停業", "sus_beg": "1141130", "sus_end": "1151129"}}
+    p = FakeProvider(company=comp, gov={"87654321": "測試部測試發展署測試分署"})
+    rec = engine.query("87654321", p)
+    assert rec["登記狀態"] == "", "重號記錄的停業資訊不該採用"
+    assert "名稱不符" in rec["統編備註"]
+    assert rec["大分類"] == "政府機關"
+
+
+def test_legacy_gcis_cache_without_suspension_fields():
+    """舊快取只有 name／status：缺欄位視為空，不炸也不重打 API。"""
+    comp = {"87654321": {"name": "測試控股股份有限公司", "status": "核准設立"}}
+    rec = engine.query("87654321", FakeProvider(company=comp), fallback_name="測試控股")
+    assert rec["登記狀態"] == "核准設立"
+    assert rec["產業大類"] == R.TAX_MISSING_SECTION
 
 
 def test_frozen_status_dissolved_offline():

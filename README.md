@@ -227,7 +227,9 @@ py -3.12 core/emit_rule_table.py     # 產出 docs/分類邏輯表.csv 與 .md
 除了 `classify.py` 的標準輸出，`emit_eight_column.py` 可產出「身分軌＋行業軌」並列的
 八欄版對照表：身分軌是本文件的身分分類判定結果（一般企業子類留空，
 產業資訊改由行業軌回答）；行業軌是稅籍主行業代號直查 `rules.SECTION_BY_MAJOR2`
-（稅務行業標準分類第 9 次修訂 A–S 十九大類），兩軌互相獨立、行業軌禁止人工裁決。
+（稅務行業標準分類第 9 次修訂 A–S 十九大類），兩軌互相獨立。
+行業軌只認稅籍主碼——唯一的例外是官方四個來源全查無的戶，可由 L1-3 人工填值，
+見 [`exceptions/README.md`](exceptions/README.md) 的 `override` 一節。
 
 ```bash
 py -3.12 emit_eight_column.py --in <輸入.xlsx> --out <輸出.xlsx>
