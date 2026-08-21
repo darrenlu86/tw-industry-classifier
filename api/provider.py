@@ -22,6 +22,8 @@ r"""API Provider — 打單筆查詢 API，免下載 320 MB 全檔
   gov_local.csv          94 KB   地方政府機關（#166161）
   authority_master.csv  446 KB   金管會權威名冊（非公開檔，見 crawlers/）
   合計約 580 KB —— 相較本地端模式的 320 MB，縮減 99.8%。
+  （v5 選用）listed_master.csv＋listed_industry_map.csv —— L2-5 上市櫃名冊，
+  缺檔即跳層，見 crawlers/fetch_listed.py。
 
 實測依據：財政部 OAS（eip.fia.gov.tw/OAI/v2/api-docs）24 個 path 全數檢視，
 無任何政府機關端點；財政部 03732303、勞保局 03769808 在 businessRegistration
@@ -85,11 +87,13 @@ class ApiProvider(ProviderBase):
         self._gov = {}
         for fn in ("gov_central.csv", "gov_local.csv"):
             self._gov.update(self._load_pairs(fn, required=True))
+        self._listed = self._load_listed()             # L2-5：兩檔皆為小檔，缺檔即跳層
         return self
 
     def registry_summary(self):
         return {"authority_master.csv": len(self._authority),
                 "機關名冊（central＋local）": len(self._gov),
+                "上市櫃名冊": len(self._listed) or "（未提供，L2-5 跳過）",
                 "學校／非營利": "改由單筆 API 查詢"}
 
     # ── HTTP ─────────────────────────────────────────────────────────────

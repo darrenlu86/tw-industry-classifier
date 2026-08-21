@@ -10,9 +10,13 @@ r"""本地端 Provider — 讀已下載的全檔，可完全離線執行
   3. 逐筆掃描（沒索引又只查一筆時的退路）
      掃 zip 並在命中後提早結束，平均約 10–20 秒。結果會快取在記憶體。
 
-GCIS 在本地端模式僅剩「名稱解析」一種用途（company()，補稅籍查無者的名稱），
-仍需連外；--offline 時該筆改用備用名稱並標記。
+GCIS 在本地端模式有兩種用途，都只在稅籍查無時才會用到：名稱解析（company() 的 name），
+以及 v5 新增的 L3-D 登記狀態（company() 的 status，判「已解散（歷史戶）」）。
+兩者都需連外；--offline 時該筆改用備用名稱、L3-D 整層跳過並在統編備註標記。
 （v4 起引擎不再查 GCIS 所營事業——原 L3-9 層已移除。）
+
+L2-5 上市櫃名冊（v5 選用，data/listed_master.csv＋listed_industry_map.csv）
+由父類 ProviderBase.load_registries 一併載入，缺檔即跳層。
 """
 import csv
 import io
@@ -72,7 +76,8 @@ class LocalProvider(ProviderBase):
         parts = []
         for fn, label in ((TAX_ZIP, "稅籍"), ("BGMOPEN99.csv", "非營利"),
                           ("BGMOPEN99X.csv", "學校"), ("gov_central.csv", "機關中央"),
-                          ("gov_local.csv", "機關地方"), ("authority_master.csv", "金管會")):
+                          ("gov_local.csv", "機關地方"), ("authority_master.csv", "金管會"),
+                          ("listed_master.csv", "上市櫃")):     # 缺檔就不出現在版本字串
             p = self._path(fn)
             if os.path.exists(p):
                 parts.append("%s=%s" % (label, time.strftime("%Y-%m-%d",

@@ -35,6 +35,20 @@ def add(rid, layer, source, key, cond, group, sub, conf, note=""):
                  "大分類": group, "子分類": sub, "信心": conf, "資料來源": source, "備註": note})
 
 
+# ── L0 ────────────────────────────────────────────────────────────────────
+# UID 前綴表刻意以通用措辭描述：它是可設定的對照表（rules.UID_PREFIX），
+# 換一個組織換一組前綴，文件不用重寫。
+for _prefix, _group in sorted(R.UID_PREFIX.items()):
+    add("L0-%s" % _prefix, "L0 統編解析", "輸入值本身", "統一編號首碼",
+        "= %s（不分大小寫）" % _prefix, _group, "（空白）", "high",
+        "命中即終結，不再進任何名冊／稅籍／名稱層")
+add("L0-N", "L0 統編解析", "本地例外表（exceptions/local_exceptions.json）", "官方名稱",
+    "統編空白／N-A，且命中無統編歸戶表（目前 %d 筆）" % len(X.NO_TAXID_ACCOUNTS),
+    "（依表值）", "（依表值）", "high", "名稱完全比對。內容不進版控；查無則歸「無法分類」")
+add("L0-X", "L0 統編解析", "輸入值本身", "統一編號",
+    "非 8 碼數字，且首碼不在 UID 前綴表", R.UNCLASSIFIED[0], "（空白）", "low",
+    "統編備註標「%s」；8 碼數字才續走 L1" % R.UID_FORMAT_NOTE)
+
 # ── L1 ────────────────────────────────────────────────────────────────────
 # 本地例外表（L1-1／L1-3／L1-4／L1-5）的**內容**刻意不寫進這份文件——
 # 那些是針對特定機構的人工裁決，理由常涉及業務關係，不該進版控的文件。
@@ -63,7 +77,32 @@ for reg in R.REGISTRIES:
         "命中名冊（%s 列）" % f"{reg['rows']:,}",
         gives[0], gives[1] if len(gives) > 1 else "（依名冊值）", "high", reg["note"])
 
-# ── L3 ────────────────────────────────────────────────────────────────────
+# ── L3-A ──────────────────────────────────────────────────────────────────
+_MATCH_LABEL = {"contains": "名稱含", "contains_all": "名稱同時含", "endswith": "名稱以…結尾",
+                "contains_ext": "名稱含（校詞之後須帶延續詞）"}
+add("L3-A 前置排除", "L3-A 制度性名稱", "官方正式名稱", "名稱含（整層跳過）",
+    "／".join(R.CORP_PREFIX), "—", "—", "—",
+    "法人與公協會交給 L2-4 非營利名冊與 L3-6 法人前綴，L3-A 不介入")
+for rid, group, sub, mode, kws, conf in R.INSTITUTIONAL_RULES:
+    note = "早於稅籍層：這類實體的稅籍主碼常是附屬營業碼，放稅籍後會被蓋掉"
+    excl = R.INSTITUTIONAL_KEYWORD_EXCLUDE.get(rid, ())
+    if excl:
+        note = "排除 " + "／".join(excl) + "；" + note
+    add("L3-A/%s" % rid, "L3-A 制度性名稱", "官方正式名稱",
+        _MATCH_LABEL[mode] + ("（且無店家型後綴）" if rid in R.CORP_SUFFIX_GUARD_RULES else ""),
+        "／".join(kws), group, sub, conf, note)
+add("L3-A 排除", "L3-A 制度性名稱", "—",
+    "公司／店家型後綴（%s 適用）" % "／".join(R.CORP_SUFFIX_GUARD_RULES),
+    "／".join(R.CORP_SUFFIX_EXCLUDE), "—", "—", "—",
+    "防呆：名稱含這些後綴者是營業人，避免收進「大學光學科技股份有限公司」這類真公司")
+add("L3-A/A3b 白名單", "L3-A 制度性名稱", "官方正式名稱", "第一個校詞之後的字串須含",
+    "／".join(R.SCHOOL_EXTENSION_WORDS), "（不含則跳過 A3b）", "—", "—",
+    "校內單位命名公式化，店家不是——用延續詞問，比逐一列舉店家業態收斂")
+add("L3-A/A3b 黑名單", "L3-A 制度性名稱", "官方正式名稱", "全名含（否決 A3b）",
+    "／".join(R.SCHOOL_EXTENSION_BLOCK), "—", "—", "—",
+    "住宅社區管委會：名稱裡的「大學」是建案名或地名，不是學校")
+
+# ── L3-B ──────────────────────────────────────────────────────────────────
 for c2, label in R.MEDICAL2.items():
     add("L3-1", "L3 稅籍碼表", "財政部稅籍", "主行業代號前2碼", "= %s（%s）" % (c2, label),
         "一般企業", "醫療", "high", "須早於 L3-6 與 L2-4，否則財團法人醫院會被判為法人")
@@ -84,11 +123,31 @@ for c2 in sorted(R.SUB_BY_MAJOR2):
         "= %s（%s）" % (c2, R.MAJOR2_LABEL.get(c2, "")),
         "一般企業", R.SUB_BY_MAJOR2[c2], "medium", "完整覆蓋 01–99，保證不落空")
 for rid, group, sub, kws in R.NAME_RULES:
+    excl = R.NAME_RULE_SUFFIX_EXCLUDE.get(rid, ())
     add("L3-8/%s" % rid, "L3 名稱關鍵字", "官方正式名稱（僅稅籍查無時）", "名稱含",
         "／".join(k.rstrip("$").replace("(股份)?", "") + ("（尾字）" if k.endswith("$") else "")
                  for k in kws),
-        group, sub, "medium", "順序即優先序")
+        group, sub, "medium",
+        "順序即優先序" + ("；排除尾綴 " + "／".join(excl) if excl else ""))
 add("L4", "L4 兜底", "—", "—", "以上全未命中", R.FALLBACK[0], R.FALLBACK[1], "low", R.FALLBACK[2])
+
+# ── 單軌合併（產業大類）──────────────────────────────────────────────────
+# 這兩層不決定身分軌的大分類／子分類，只換單軌的產業大類／產業子類，
+# 所以排在 L4 之後獨立成一節。
+add("L2-5", "單軌合併（產業大類）",
+    "證交所 t187ap03_L＋櫃買 mopsfin_t187ap03_O（data/listed_master.csv）", "統一編號",
+    "身分軌＝一般企業且稅籍查無，命中上市櫃名冊",
+    "（對照 listed_industry_map.csv 的 A–S 大類）", "（名冊產業別名稱）", "high",
+    "缺檔即跳層；依據詞帶市場別（TWSE／TPEx）與產業別代碼")
+add("L2-5R", "單軌合併（產業大類）", "同上", "產業別代碼",
+    "命中名冊，但該代碼在對照表無 A–S 歸屬（其他業／綠能環保／存託憑證）",
+    R.UNMAPPED_SECTION, "（名冊產業別名稱）", "medium",
+    "上市櫃身分官方已證實、產業歸屬官方沒給——標「其他」而不硬塞一個猜出來的大類")
+add("L3-D", "單軌合併（產業大類）", "GCIS 商工登記／L1-5 凍結登記狀態表", "登記狀態",
+    "含 %s 任一者（**不分身分軌群組**）" % "／".join(R.DISSOLVED_STATUS_WORDS),
+    R.DISSOLVED_SECTION, "（空白）", "high",
+    "最後套用，覆蓋前面各層的產業大類；身分軌保留原群組值供稽核。"
+    "凍結表命中不需連線；--offline 且無 GCIS 快取時本層跳過並在統編備註標記。信心降 low")
 
 os.makedirs(DOCS, exist_ok=True)
 cols = ["優先序", "規則編號", "判定層", "比對鍵", "條件", "大分類", "子分類", "信心", "資料來源", "備註"]
@@ -110,7 +169,18 @@ A("")
 A("| 大分類 | 子分類 |")
 A("|---|---|")
 for g in R.GROUPS:
-    A("| %s | %s |" % (g, "、".join(R.SUBGROUPS[g])))
+    A("| %s | %s |" % (g, "、".join(s or "（空白）" for s in R.SUBGROUPS[g])))
+A("")
+A("單軌（產業大類）另有三個專屬值，不屬於上表的身分軌值域"
+  "（`classify.py` 的值域自我檢查驗的是身分軌，與這三個值無關）：")
+A("")
+A("| 單軌專屬值 | 何時出現 | 產業子類 |")
+A("|---|---|---|")
+A("| %s | 稅籍查無，且 L2-5 也沒命中 | 空白 |" % R.TAX_MISSING_SECTION)
+A("| %s | L2-5 命中，但該產業別代碼官方無 A–S 對應 | 名冊產業別名稱原值 |"
+  % R.UNMAPPED_SECTION)
+A("| %s | 登記狀態含 %s（**最後套用，覆蓋前兩者**） | 空白 |"
+  % (R.DISSOLVED_SECTION, "／".join(R.DISSOLVED_STATUS_WORDS)))
 A("")
 A("## 規則明細")
 cur = None

@@ -30,10 +30,12 @@ import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
+sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "core"))
 
 import engine  # noqa: E402
 import rules as R  # noqa: E402
+from classify import RULES_VERSION  # noqa: E402
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -104,7 +106,7 @@ def main():
     failures = []
 
     print("輸入清單：%s" % args.input)
-    print("規則版本 v4（rules.py）")
+    print("規則版本 %s（rules.py）" % RULES_VERSION)   # 讀 classify.py，不寫死才不會漂移
     print()
 
     # ── test 2／3：重現性 ────────────────────────────────────────────────

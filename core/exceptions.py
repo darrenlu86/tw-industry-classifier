@@ -14,21 +14,23 @@ r"""例外表載入層 — 把「與特定機構有關的人工裁決」與「�
   * 換一個組織使用時本來就該重新檢視，不該照抄
 
 所以它們放在外部檔 `exceptions/local_exceptions.json`，本檔負責載入。
-檔案不存在時四張表都是空的，分類器照樣跑——只是少了那些人工裁決。
+檔案不存在時所有表都是空的，分類器照樣跑——只是少了那些人工裁決。
 
-四張表的用途
+各表的用途
 ────────────
-  TAX_ID_FIX     統編修正：帳務系統的佔位碼或已知錯碼 → 正確統編
-  PERIPHERAL     周邊單位白名單（**本檔內建，因為都是法定公開機構**）；
-                 v4 起值為 (官方名稱, 所屬大類)，判定結果＝所屬大類／周邊單位
-  OVERRIDE       已裁決例外：名冊或稅籍碼判定與事實不符者
-  FROZEN_NAMES   存量凍結官方名稱：四個名冊都查無者的名稱（人工查證一次）
-  FROZEN_STATUS  存量凍結登記狀態：已知終止登記者
+  TAX_ID_FIX        統編修正：帳務系統的佔位碼或已知錯碼 → 正確統編
+  PERIPHERAL        周邊單位白名單（**本檔內建，因為都是法定公開機構**）；
+                    v4 起值為 (官方名稱, 所屬大類)，判定結果＝所屬大類／周邊單位
+  OVERRIDE          已裁決例外：名冊或稅籍碼判定與事實不符者
+  FROZEN_NAMES      存量凍結官方名稱：四個名冊都查無者的名稱（人工查證一次）
+  FROZEN_STATUS     存量凍結登記狀態：已知終止登記者
+  NO_TAXID_ACCOUNTS 無統編歸戶表（v5）：統編欄空白者以名稱歸戶（L0-N）
 
 格式與維護方式見 `exceptions/README.md`；範本見 `exceptions/local_exceptions.example.json`。
 """
 import json
 import os
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -61,11 +63,12 @@ PERIPHERAL_BUILTIN = {
 # （本地追加屬各組織裁決，不進版控文件——見 emit_rule_table.py）。
 PERIPHERAL = dict(PERIPHERAL_BUILTIN)
 
-# ── 以下四張表預設為空，由本地例外檔填入 ──────────────────────────────────
+# ── 以下五張表預設為空，由本地例外檔填入 ──────────────────────────────────
 TAX_ID_FIX = {}
 OVERRIDE = {}
 FROZEN_NAMES = {}
 FROZEN_STATUS = {}
+NO_TAXID_ACCOUNTS = {}
 
 _loaded_from = ""
 
@@ -90,14 +93,30 @@ def _coerce_pairs(raw):
     return out
 
 
+def _coerce_no_taxid(raw):
+    """NO_TAXID_ACCOUNTS 的值是 [大分類, 子分類, 理由]；鍵是名稱（完全比對，去頭尾空白）。"""
+    out = {}
+    for name, v in (raw or {}).items():
+        if isinstance(v, (list, tuple)) and len(v) >= 3:
+            out[str(name).strip()] = (v[0], v[1], v[2])
+    return out
+
+
 def load(path=None):
     """載入本地例外檔。回傳實際載入的路徑（沒有檔案回空字串）。"""
-    global TAX_ID_FIX, OVERRIDE, FROZEN_NAMES, FROZEN_STATUS, _loaded_from
+    global TAX_ID_FIX, OVERRIDE, FROZEN_NAMES, FROZEN_STATUS, NO_TAXID_ACCOUNTS, _loaded_from
     PERIPHERAL.clear()
     PERIPHERAL.update(PERIPHERAL_BUILTIN)
     p = path or LOCAL_FILE
     if not os.path.exists(p):
+        TAX_ID_FIX, OVERRIDE, FROZEN_NAMES, FROZEN_STATUS, NO_TAXID_ACCOUNTS = {}, {}, {}, {}, {}
         _loaded_from = ""
+        # 說出來。靜默回空表的話，整批跑完不會有任何跡象顯示人工裁決其實沒生效——
+        # 統編修正、無統編歸戶這些都會安靜地不作用，結果看起來卻很正常。
+        print("提醒：找不到本地例外檔 %s，各例外表為空（統編修正／已裁決例外／"
+              "凍結名稱／凍結登記狀態／無統編歸戶皆不生效）。範本見 %s"
+              % (p, os.path.join(os.path.dirname(p), "local_exceptions.example.json")),
+              file=sys.stderr)
         return ""
     with open(p, encoding="utf-8") as f:
         data = json.load(f)
@@ -105,6 +124,9 @@ def load(path=None):
     OVERRIDE = _coerce_override(data.get("override"))
     FROZEN_NAMES = _coerce_pairs(data.get("frozen_names"))
     FROZEN_STATUS = {str(k): v for k, v in (data.get("frozen_status") or {}).items()}
+    # v5：統編欄空白的帳（政府單位的分支、無登記的合作對象等）以名稱歸戶。
+    # 名稱是唯一的鍵，所以要求完全比對——模糊比對在這種表上只會製造難查的錯配。
+    NO_TAXID_ACCOUNTS = _coerce_no_taxid(data.get("no_taxid_accounts"))
     # 本地檔也可以追加周邊單位（例如你的組織把某個公協會視為周邊單位）。
     # 值格式 [官方名稱, 所屬大類]；所屬大類限 金控與銀行／證券期貨／保險。
     for tid, v in (data.get("peripheral_extra") or {}).items():
@@ -117,7 +139,7 @@ def load(path=None):
 def summary():
     """給 --doctor 用的一行摘要。"""
     return {
-        "本地例外檔": _loaded_from or "（未提供，四張例外表為空）",
+        "本地例外檔": _loaded_from or "（未提供，各例外表為空）",
         "統編修正": len(TAX_ID_FIX),
         "周邊單位白名單": "%d（內建 %d＋本地追加 %d）" % (
             len(PERIPHERAL), len(PERIPHERAL_BUILTIN),
@@ -125,6 +147,7 @@ def summary():
         "已裁決例外": len(OVERRIDE),
         "凍結名稱": len(FROZEN_NAMES),
         "凍結登記狀態": len(FROZEN_STATUS),
+        "無統編歸戶": len(NO_TAXID_ACCOUNTS),
     }
 
 

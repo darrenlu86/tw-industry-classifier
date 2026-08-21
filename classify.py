@@ -16,11 +16,13 @@ r"""產業分類查詢 — 統一入口（本地端與 API 端共用）
 
 用法
 ────
-  # 單筆查詢
+  # 單筆查詢（v5 起也吃 F 碼／P 碼與格式異常值，一律有明確輸出）
   py -3.12 classify.py 22099131
+  py -3.12 classify.py F000001
   py -3.12 classify.py --mode api 22099131
 
   # 整批跑名單（CSV，第一欄統編；有表頭會自動略過）
+  # 統編欄留空但第二欄有名稱的列會保留，走無統編歸戶表（L0-N）
   py -3.12 classify.py --input input/taxids.csv --output output/result.csv
 
   # 完全離線（跳過 GCIS 那層，該類統編改由稅籍大類判定）
@@ -49,7 +51,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 DATA = os.path.join(HERE, "data")
 OUTPUT = os.path.join(HERE, "output")
-RULES_VERSION = "v4"
+RULES_VERSION = "v5"
 
 
 def build_provider(mode, offline, tolerate_api_error=False):
@@ -75,16 +77,23 @@ def build_provider(mode, offline, tolerate_api_error=False):
 
 
 def read_taxids(path):
-    """讀第一欄統編；自動略過表頭與空列。回 [(統編, 備用名稱)]。"""
+    """讀第一欄統編；自動略過表頭與全空列。回 [(統編, 備用名稱)]。
+
+    v5 起「統編欄空白但第二欄有名稱」的列**保留**——那是無統編戶（扣繳單位、
+    無台灣登記的合作對象等），由引擎的 L0-N 走無統編歸戶表以名稱歸戶。
+    v4 會靜默丟掉這些列，等於交付出去的名單少了人卻不會有人發現。
+    """
     out = []
     with open(path, encoding="utf-8-sig", newline="") as f:
         for i, row in enumerate(csv.reader(f)):
-            if not row or not row[0].strip():
+            if not row:
                 continue
             first = row[0].strip()
+            name = row[1].strip() if len(row) > 1 else ""
+            if not first and not name:
+                continue                              # 整列皆空
             if i == 0 and not any(ch.isdigit() for ch in first):
                 continue                              # 表頭
-            name = row[1].strip() if len(row) > 1 else ""
             out.append((first, name))
     return out
 
@@ -100,7 +109,11 @@ def doctor():
             ("BGMOPEN99.csv", "非營利團體名冊", "兩種模式皆需", "core/fetch_bulk_data.py"),
             ("BGMOPEN99X.csv", "學校名冊", "兩種模式皆需", "core/fetch_bulk_data.py"),
             ("gov_central.csv", "行政院機關名冊", "兩種模式皆需", "core/fetch_bulk_data.py"),
-            ("gov_local.csv", "地方機關名冊", "兩種模式皆需", "core/fetch_bulk_data.py")]
+            ("gov_local.csv", "地方機關名冊", "兩種模式皆需", "core/fetch_bulk_data.py"),
+            ("listed_master.csv", "上市櫃名冊（L2-5，缺檔即跳層）", "兩種模式皆選用",
+             "crawlers/fetch_listed.py"),
+            ("listed_industry_map.csv", "上市櫃產業別對照（L2-5）", "兩種模式皆選用",
+             "crawlers/fetch_listed.py")]
     ok = True
     for fn, desc, when, how in need:
         p = os.path.join(DATA, fn)
@@ -126,13 +139,17 @@ def count_generic_rules():
 
     本地例外表另計——它的筆數會隨各組織自己的裁決而變，不算通用規則。
     """
-    return (3                          # L1-1／L1-3／L1-2 本地追加，各以一條摘要列表示
+    return (len(R.UID_PREFIX) + 2      # L0：UID 前綴表各一條，加 L0-N／L0-X
+            + 3                        # L1-1／L1-3／L1-2 本地追加，各以一條摘要列表示
             + len(X.PERIPHERAL_BUILTIN)  # L1-2 內建周邊單位白名單（法定公開機構）
             + len(R.REGISTRIES)
+            # L3-A 名稱規則，加前置排除／店家型後綴／A3b 延續詞白名單與黑名單各一條
+            + len(R.INSTITUTIONAL_RULES) + 4
             + len(R.MEDICAL2) + len(R.FIN6) + len(R.FIN4) + len(R.EDU_CORP2)
             + 1                        # L3-6 法人名稱前綴
             + len(R.SUB_BY_MAJOR2) + len(R.NAME_RULES)
-            + 1)                       # L4 兜底
+            + 1                        # L4 兜底
+            + 3)                       # 單軌合併：L2-5、L2-5R 無 A–S 對應、L3-D 登記狀態
 
 
 def main():

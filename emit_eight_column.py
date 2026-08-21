@@ -55,7 +55,10 @@ def eight_columns(provider, raw_tax_id, raw_industry=""):
     """一筆輸入 → 八欄 list。"""
     rec = engine.query(raw_tax_id, provider)
     tid = rec["統一編號"]                             # 已套用統編修正表
-    section, major2 = engine.industry_track(provider, tid)
+    if rec["分類依據層"].startswith("L0"):            # L0 終結者沒有 8 碼統編，行業軌不適用
+        section, major2 = "", ""
+    else:
+        section, major2 = engine.industry_track(provider, tid)
     # 依據詞去尾端空白：引擎對超長裁決理由做 head[:40] 截斷，切點可能落在空白後
     group, sub, basis = rec["大分類"], rec["子分類"], rec["分類依據詞"].rstrip()
     if group == "一般企業":

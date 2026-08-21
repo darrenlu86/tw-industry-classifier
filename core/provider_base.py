@@ -44,6 +44,7 @@ class ProviderBase:
         self._gov = {}
         self._school = {}
         self._nonprofit = {}
+        self._listed = {}
         self._missing = []
 
     # ── 名冊載入 ─────────────────────────────────────────────────────────
@@ -55,6 +56,7 @@ class ProviderBase:
             self._gov.update(self._load_pairs(fn, required=False))
         self._school = self._load_pairs("BGMOPEN99X.csv", required=False)
         self._nonprofit = self._load_pairs("BGMOPEN99.csv", required=False)
+        self._listed = self._load_listed()
         return self
 
     def _path(self, filename):
@@ -96,6 +98,42 @@ class ProviderBase:
                         out.setdefault(tid, row[name_col].strip())
         return out
 
+    def _load_listed(self):
+        """L2-5 上市櫃名冊：兩個檔在載入時就 join 好，引擎拿到的是一筆完整記錄。
+
+        缺任一檔＝這一層不存在（回空 dict），引擎會直接跳過——名冊由
+        crawlers/fetch_listed.py 產生，不是每個使用者都會跑。
+        欄位契約見 docs/資料來源與更新.md，兩檔皆 UTF-8-SIG。
+        """
+        master = self._path("listed_master.csv")
+        mapping = self._path("listed_industry_map.csv")
+        if not (os.path.exists(master) and os.path.exists(mapping)):
+            return {}
+        sections = {}
+        with open(mapping, encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                sections[(row.get("市場別", "").strip(), row.get("產業別代碼", "").strip())] = (
+                    row.get("行業軌大類代碼", "").strip(), row.get("行業軌大類名稱", "").strip())
+        out = {}
+        with open(master, encoding="utf-8-sig", newline="") as f:
+            for row in csv.DictReader(f):
+                tid = normalize_tax_id(row.get("統一編號", ""))
+                if not tid:
+                    continue
+                market = row.get("市場別", "").strip()
+                ind_code = row.get("產業別代碼", "").strip()
+                # 對不到 A–S 大類的仍然收進來，section 留空——名冊本身已證實
+                # 上市櫃身分，只是官方沒給得出對應的行業歸屬（其他業／綠能環保等）。
+                # 由引擎決定怎麼標，這裡不替它決定「寧缺勿錯」而整列丟掉。
+                sec = sections.get((market, ind_code)) or ("", "")
+                out.setdefault(tid, {
+                    "market": market, "code": row.get("公司代號", "").strip(),
+                    "name": row.get("公司名稱", "").strip(),
+                    "ind_code": ind_code, "ind_name": row.get("產業別名稱", "").strip(),
+                    "section": ("%s %s" % sec) if sec[1] else "",
+                })
+        return out
+
     # ── 引擎呼叫的介面 ───────────────────────────────────────────────────
     def authority(self, tax_id):
         return self._authority.get(tax_id, [])
@@ -108,6 +146,10 @@ class ProviderBase:
 
     def nonprofit(self, tax_id):
         return self._nonprofit.get(tax_id)
+
+    def listed(self, tax_id):
+        """L2-5 上市櫃名冊：回 {"market","code","name","ind_code","ind_name","section"} 或 None。"""
+        return self._listed.get(tax_id)
 
     def tax(self, tax_id):
         raise NotImplementedError
@@ -130,4 +172,5 @@ class ProviderBase:
             "機關名冊（central＋local）": len(self._gov),
             "學校名冊": len(self._school),
             "非營利名冊": len(self._nonprofit),
+            "上市櫃名冊": len(self._listed) or "（未提供，L2-5 跳過）",
         }
