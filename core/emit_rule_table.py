@@ -47,7 +47,7 @@ for _prefix, _group in sorted(R.UID_PREFIX.items()):
         "= %s（不分大小寫）" % _prefix, _group, "（空白）", "high",
         "命中即終結，不再進任何名冊／稅籍／名稱層")
 add("L0-N", "L0 統編解析", "本地例外表（exceptions/local_exceptions.json）", "官方名稱",
-    "統編空白／N-A，且命中無統編歸戶表（目前 %d 筆）" % len(X.NO_TAXID_ACCOUNTS),
+    "統編空白／N-A，且命中無統編歸戶表（筆數依本機例外檔，--doctor 查看）",
     "（依表值）", "（依表值）", "high", "名稱完全比對。內容不進版控；查無則歸「無法分類」")
 add("L0-X", "L0 統編解析", "輸入值本身", "統一編號",
     "非 8 碼數字，且首碼不在 UID 前綴表", R.UNCLASSIFIED[0], "（空白）", "low",
@@ -59,7 +59,7 @@ add("L0-X", "L0 統編解析", "輸入值本身", "統一編號",
 # 這裡只記「有這一層、目前幾筆」；內容由使用者自己在
 # exceptions/local_exceptions.json 維護，格式見 exceptions/README.md。
 add("L1-1", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
-    "命中統編歸戶表（目前 %d 筆）" % len(X.TAX_ID_FIX),
+    "命中統編歸戶表（筆數依本機例外檔，--doctor 查看）",
     "（改用歸戶統編查詢後續各層）", "—", "high",
     "查詢重導向，**不改寫輸出的統一編號**（輸出保留輸入原值，否則 join 不回原始報表）；"
     "統編備註記「統編歸戶：查詢採 …」。內容不進版控")
@@ -67,11 +67,11 @@ for tid, (name, peri_group) in sorted(X.PERIPHERAL_BUILTIN.items()):
     add("L1-2", "L1 特殊規則", "內建白名單（core/exceptions.py）",
         "統一編號", "= %s" % tid, peri_group, "周邊單位", "high", name)
 add("L1-2", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
-    "命中本地追加周邊單位（目前 %d 筆）" % (len(X.PERIPHERAL) - len(X.PERIPHERAL_BUILTIN)),
+    "命中本地追加周邊單位（筆數依本機例外檔，--doctor 查看）",
     "（依所屬大類）", "周邊單位", "high",
     "組織自行認定的周邊單位（公協會等），值＝[名稱, 所屬大類]。內容不進版控")
 add("L1-3", "L1 特殊規則", "本地例外表（exceptions/local_exceptions.json）", "統一編號",
-    "命中已裁決例外表（目前 %d 筆）" % len(X.OVERRIDE),
+    "命中已裁決例外表（筆數依本機例外檔，--doctor 查看）",
     "（依裁決值）", "（依裁決值）", "high",
     "名冊或稅籍碼判定與事實不符時的人工裁決，每筆附理由與日期。內容不進版控")
 add("L1-3R", "L1 特殊規則", "同上", "裁決值形態",
@@ -209,12 +209,12 @@ for r in rows:
 A("")
 A("### L1-4／L1-5 存量凍結表")
 A("")
-A("| 表 | 用途 | 目前筆數 |")
+A("| 表 | 用途 | 筆數 |")
 A("|---|---|---|")
 A("| L1-4 凍結官方名稱 | 四個名冊都查無名稱時（已解散公司、外商在台、"
-  "機關名冊未收錄的機關），人工查證一次後凍結 | %d |" % len(X.FROZEN_NAMES))
-A("| L1-5 凍結登記狀態 | 標記已知終止登記者；填了該筆信心降為 low，進季度複核 | %d |"
-  % len(X.FROZEN_STATUS))
+  "機關名冊未收錄的機關），人工查證一次後凍結 | 依本機例外檔（--doctor 查看） |")
+A("| L1-5 凍結登記狀態 | 標記已知終止登記者；填了該筆信心降為 low，進季度複核 |"
+  " 依本機例外檔（--doctor 查看） |")
 A("")
 A("這兩張表與 L1-1／L1-3 一樣放在 `exceptions/local_exceptions.json`，")
 A("**內容不寫進本文件**——那是針對特定機構的人工查證結果。格式見 `exceptions/README.md`。")
